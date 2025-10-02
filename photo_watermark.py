@@ -22,7 +22,13 @@ def get_exif_datetime(image_path):
             return date.strftime('%Y-%m-%d')
     except Exception:
         pass
-    return None
+    # 如果没有 exif，使用文件修改时间
+    try:
+        mtime = os.path.getmtime(image_path)
+        date = datetime.fromtimestamp(mtime)
+        return date.strftime('%Y-%m-%d')
+    except Exception:
+        return None
 
 def add_watermark(img_path, text, font_size, color, position, out_path):
     image = Image.open(img_path)
@@ -33,7 +39,12 @@ def add_watermark(img_path, text, font_size, color, position, out_path):
     except Exception:
         font = ImageFont.load_default()
     w, h = image.size
-    text_w, text_h = draw.textsize(text, font=font)
+    # 兼容 Pillow 新旧版本
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except Exception:
+        text_w, text_h = font.getsize(text)
     if position == 'left_top':
         xy = (10, 10)
     elif position == 'center':
@@ -62,7 +73,7 @@ def main():
         print('图片文件夹路径不存在')
         sys.exit(1)
 
-    out_dir = os.path.join(img_dir, os.path.basename(img_dir) + '_watermark')
+    out_dir = os.path.join(img_dir, '_watermark')
     os.makedirs(out_dir, exist_ok=True)
 
     for fname in os.listdir(img_dir):
