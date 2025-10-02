@@ -1,0 +1,25 @@
+# Core GUI Framework
+PyQt5>=5.15.0
+
+# Image Processing
+Pillow>=8.0.0
+piexif>=1.1.3
+
+# Utilities
+packaging>=21.0
+
+# Development Tools (optional)
+pyinstaller>=4.0
+black>=21.0.0
+flake8>=3.9.0
+
+# Logging and Configuration
+colorlog>=6.0.0
+pyyaml>=5.4.0
+
+# Testing (optional)
+pytest>=6.0.0
+pytest-qt>=4.0.0
+
+# Performance monitoring (optional)
+psutil>=5.8.0

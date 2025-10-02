@@ -1,0 +1,446 @@
+"""
+水印处理引擎
+专门处理大图片水印，优化内存使用
+"""
+import os
+from typing import Optional, Tuple
+from PIL import Image, ImageDraw, ImageFont
+from models.watermark_config import WatermarkConfig, WatermarkType, WatermarkPosition
+from utils.logger import logger, log_exception, log_performance
+
+
+class WatermarkEngine:
+    """水印处理引擎，优化大图片处理"""
+    
+    def __init__(self):
+        logger.info("初始化水印引擎...")
+        self.max_image_dimension = 8000  # 最大单边尺寸
+        self.max_overlay_size = 1000 * 1000  # 降低最大overlay像素数
+        self.memory_conservative_mode = False
+        self.ultra_conservative_mode = False  # 超保守模式，针对大文件
+        logger.debug(f"水印引擎参数: max_dimension={self.max_image_dimension}, max_overlay={self.max_overlay_size}")
+    
+    @log_performance
+    def process_image(self, image_path: str, config: WatermarkConfig, 
+                     output_path: Optional[str] = None) -> Optional[str]:
+        """
+        处理图片添加水印
+        
+        Args:
+            image_path: 输入图片路径
+            config: 水印配置
+            output_path: 输出路径，如果为None则覆盖原文件
+            
+        Returns:
+            处理后的图片路径，失败返回None
+        """
+        logger.info(f"开始处理图片: {os.path.basename(image_path)}")
+        logger.debug(f"输入路径: {image_path}")
+        logger.debug(f"输出路径: {output_path}")
+        logger.debug(f"水印类型: {config.watermark_type}")
+        
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(image_path):
+                logger.error(f"输入文件不存在: {image_path}")
+                return None
+            
+            # 打开图片并检查尺寸
+            logger.debug("打开图片文件进行处理")
+            with Image.open(image_path) as img:
+                original_size = img.size
+                logger.info(f"图片尺寸: {original_size[0]}x{original_size[1]} 像素")
+                print(f"处理图片: {original_size[0]}x{original_size[1]} 像素")
+                
+                # 检查是否需要启用内存保守模式
+                total_pixels = original_size[0] * original_size[1]
+                file_size_mb = os.path.getsize(image_path) / (1024 * 1024)
+                
+                logger.debug(f"图片信息: {total_pixels/1e6:.1f}MP, {file_size_mb:.1f}MB")
+                
+                if total_pixels > 25 * 1024 * 1024 or file_size_mb > 5.0:  # 25MP以上或5MB以上
+                    self.ultra_conservative_mode = True
+                    self.memory_conservative_mode = True
+                    logger.info(f"启用超保守模式 (像素: {total_pixels/1e6:.1f}MP, 文件: {file_size_mb:.1f}MB)")
+                elif total_pixels > 15 * 1024 * 1024:  # 15MP以上
+                    self.memory_conservative_mode = True
+                    logger.info(f"启用内存保守模式 (像素: {total_pixels/1e6:.1f}MP)")
+                else:
+                    logger.debug("使用标准处理模式")
+                
+                # 预处理大图片以节省内存
+                if self.ultra_conservative_mode:
+                    img = self._preprocess_large_image(img)
+                
+                # 处理图片
+                processed_img = self._apply_watermark(img, config)
+                
+                if processed_img is None:
+                    return None
+                
+                # 确定输出路径
+                if output_path is None:
+                    base, ext = os.path.splitext(image_path)
+                    output_path = f"{base}_watermarked{ext}"
+                
+                # 保存图片
+                logger.info(f"保存处理后的图片: {output_path}")
+                self._save_image(processed_img, output_path, original_size)
+                logger.info(f"水印图片已成功保存: {output_path}")
+                print(f"✓ 水印图片已保存: {output_path}")
+                
+                return output_path
+                
+        except Exception as e:
+            logger.error(f"水印处理失败: {e}")
+            print(f"水印处理失败: {e}")
+            return None
+    
+    @log_exception
+    def _apply_watermark(self, img: Image.Image, config: WatermarkConfig) -> Optional[Image.Image]:
+        """应用水印到图片"""
+        try:
+            logger.debug(f"开始应用水印: {config.watermark_type}")
+            
+            if config.watermark_type == WatermarkType.TEXT:
+                logger.debug(f"应用文本水印: '{config.text_config.text}'")
+                return self._apply_text_watermark_optimized(img, config)
+            elif config.watermark_type == WatermarkType.IMAGE:
+                logger.debug(f"应用图片水印: {config.image_config.image_path}")
+                return self._apply_image_watermark_optimized(img, config)
+            else:
+                logger.warning(f"未知的水印类型: {config.watermark_type}")
+                return img
+        except Exception as e:
+            logger.error(f"应用水印失败: {e}")
+            return None
+    
+    @log_exception
+    def _apply_text_watermark_optimized(self, img: Image.Image, config: WatermarkConfig) -> Image.Image:
+        """优化的文本水印处理"""
+        try:
+            logger.debug("开始应用文本水印")
+            # 加载字体
+            logger.debug(f"加载字体: {config.text_config.font_family}, 大小: {config.text_config.font_size}")
+            font = self._load_font(config.text_config.font_family, config.text_config.font_size)
+            text = config.text_config.text
+            logger.debug(f"水印文本: '{text}'")
+            
+            # 获取文本尺寸
+            temp_img = Image.new('RGB', (1, 1))
+            temp_draw = ImageDraw.Draw(temp_img)
+            
+            try:
+                bbox = temp_draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+            except (AttributeError, TypeError):
+                try:
+                    text_width, text_height = font.getsize(text)
+                except AttributeError:
+                    text_width = len(text) * config.text_config.font_size // 2
+                    text_height = config.text_config.font_size
+            
+            # 计算位置
+            x, y = self._calculate_position(
+                img.size[0], img.size[1], text_width, text_height, config
+            )
+            
+            # 选择渲染模式
+            if self.ultra_conservative_mode:
+                logger.info("使用超保守直接绘制模式")
+                return self._draw_text_direct(img, text, font, (x, y), config.text_config)
+            elif self.memory_conservative_mode:
+                logger.info("使用保守绘制模式")
+                return self._draw_text_direct(img, text, font, (x, y), config.text_config)
+            else:
+                logger.debug("使用高质量overlay模式")
+                return self._draw_text_with_overlay(img, text, font, (x, y), text_width, text_height, config.text_config)
+                
+        except Exception as e:
+            print(f"文本水印处理失败: {e}")
+            return img
+    
+    def _draw_text_direct(self, img: Image.Image, text: str, font: ImageFont.FreeTypeFont,
+                         position: Tuple[int, int], text_config) -> Image.Image:
+        """直接绘制文本（内存保守模式）"""
+        try:
+            # 确保图片模式适合直接绘制
+            original_mode = img.mode
+            if img.mode not in ('RGB', 'RGBA'):
+                if img.mode in ('L', 'P'):
+                    img = img.convert('RGB')
+                else:
+                    img = img.convert('RGB')
+            
+            # 创建绘制对象
+            draw = ImageDraw.Draw(img)
+            
+            # 使用RGB颜色（忽略透明度以节省内存）
+            color = text_config.color[:3]  # 只取RGB，忽略alpha
+            
+            # 绘制文本
+            draw.text(position, text, font=font, fill=color)
+            
+            # 如果原始是RGB模式，确保返回RGB（避免意外转换为RGBA）
+            if original_mode == 'RGB' and img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            return img
+            
+        except Exception as e:
+            print(f"直接文本绘制失败: {e}")
+            return img
+    
+    def _draw_text_with_overlay(self, img: Image.Image, text: str, font: ImageFont.FreeTypeFont,
+                               position: Tuple[int, int], text_width: int, text_height: int,
+                               text_config) -> Image.Image:
+        """使用overlay绘制文本（高质量模式）"""
+        try:
+            x, y = position
+            
+            # 计算overlay尺寸
+            padding = max(10, text_config.font_size // 8)
+            overlay_width = min(text_width + padding * 2, img.size[0])
+            overlay_height = min(text_height + padding * 2, img.size[1])
+            
+            # 检查overlay大小
+            if overlay_width * overlay_height > self.max_overlay_size:
+                print("Overlay太大，使用直接绘制模式")
+                return self._draw_text_direct(img, text, font, position, text_config)
+            
+            # 创建小的overlay
+            overlay = Image.new('RGBA', (overlay_width, overlay_height), (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            
+            # 在overlay上绘制文本
+            text_x = padding
+            text_y = padding
+            alpha = int(text_config.opacity * 255)
+            text_color = (*text_config.color, alpha)
+            overlay_draw.text((text_x, text_y), text, font=font, fill=text_color)
+            
+            # 合成到主图像
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+            
+            # 计算粘贴位置
+            paste_x = max(0, min(x - padding, img.size[0] - overlay_width))
+            paste_y = max(0, min(y - padding, img.size[1] - overlay_height))
+            
+            img.paste(overlay, (paste_x, paste_y), overlay)
+            
+            return img
+            
+        except MemoryError:
+            print("内存不足，回退到直接绘制")
+            return self._draw_text_direct(img, text, font, position, text_config)
+        except Exception as e:
+            print(f"Overlay文本绘制失败: {e}")
+            return self._draw_text_direct(img, text, font, position, text_config)
+    
+    def _apply_image_watermark_optimized(self, img: Image.Image, config: WatermarkConfig) -> Image.Image:
+        """优化的图片水印处理"""
+        try:
+            watermark_path = config.image_config.image_path
+            if not os.path.exists(watermark_path):
+                return img
+            
+            with Image.open(watermark_path) as watermark_img:
+                # 限制水印图片大小
+                max_wm_size = min(img.size[0] // 3, img.size[1] // 3, 800)
+                
+                if watermark_img.size[0] > max_wm_size or watermark_img.size[1] > max_wm_size:
+                    watermark_img.thumbnail((max_wm_size, max_wm_size), Image.Resampling.LANCZOS)
+                
+                # 应用缩放
+                scale = config.image_config.scale
+                new_size = (
+                    int(watermark_img.size[0] * scale),
+                    int(watermark_img.size[1] * scale)
+                )
+                watermark_img = watermark_img.resize(new_size, Image.Resampling.LANCZOS)
+                
+                # 计算位置
+                x, y = self._calculate_position(
+                    img.size[0], img.size[1], 
+                    watermark_img.size[0], watermark_img.size[1], 
+                    config
+                )
+                
+                # 合成图片
+                if self.memory_conservative_mode:
+                    # 简单粘贴，不使用透明度
+                    if watermark_img.mode == 'RGBA':
+                        watermark_img = watermark_img.convert('RGB')
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.paste(watermark_img, (x, y))
+                else:
+                    # 高质量合成
+                    original_img_mode = img.mode
+                    
+                    if watermark_img.mode != 'RGBA':
+                        watermark_img = watermark_img.convert('RGBA')
+                    
+                    # 应用透明度
+                    alpha = int(config.image_config.opacity * 255)
+                    alpha_channel = Image.new('L', watermark_img.size, alpha)
+                    watermark_img.putalpha(alpha_channel)
+                    
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                    
+                    img.paste(watermark_img, (x, y), watermark_img)
+                    
+                    # 如果原始图片是RGB，在合成后检查是否需要转回RGB
+                    if original_img_mode == 'RGB' and img.mode == 'RGBA':
+                        # 检查是否有实际透明度
+                        alpha_channel = img.split()[-1]
+                        if alpha_channel.getextrema()[0] == 255:  # 完全不透明
+                            img = img.convert('RGB')
+                
+                return img
+                
+        except Exception as e:
+            print(f"图片水印处理失败: {e}")
+            return img
+    
+    def _load_font(self, font_family: str, font_size: int) -> ImageFont.FreeTypeFont:
+        """加载字体"""
+        font_paths = [
+            font_family,
+            "arial.ttf",
+            "Arial",
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/calibri.ttf",
+            "C:/Windows/Fonts/simsun.ttc",
+            "C:/Windows/Fonts/msyh.ttc"
+        ]
+        
+        for font_path in font_paths:
+            try:
+                return ImageFont.truetype(font_path, font_size)
+            except (OSError, IOError):
+                continue
+        
+        return ImageFont.load_default()
+    
+    def _calculate_position(self, img_w: int, img_h: int, wm_w: int, wm_h: int,
+                          config: WatermarkConfig) -> Tuple[int, int]:
+        """计算水印位置"""
+        margin_x = config.margin_x
+        margin_y = config.margin_y
+        
+        position_map = {
+            WatermarkPosition.TOP_LEFT: (margin_x, margin_y),
+            WatermarkPosition.TOP_CENTER: ((img_w - wm_w) // 2, margin_y),
+            WatermarkPosition.TOP_RIGHT: (img_w - wm_w - margin_x, margin_y),
+            WatermarkPosition.CENTER_LEFT: (margin_x, (img_h - wm_h) // 2),
+            WatermarkPosition.CENTER: ((img_w - wm_w) // 2, (img_h - wm_h) // 2),
+            WatermarkPosition.CENTER_RIGHT: (img_w - wm_w - margin_x, (img_h - wm_h) // 2),
+            WatermarkPosition.BOTTOM_LEFT: (margin_x, img_h - wm_h - margin_y),
+            WatermarkPosition.BOTTOM_CENTER: ((img_w - wm_w) // 2, img_h - wm_h - margin_y),
+            WatermarkPosition.BOTTOM_RIGHT: (img_w - wm_w - margin_x, img_h - wm_h - margin_y),
+            WatermarkPosition.CUSTOM: (config.custom_x, config.custom_y),
+        }
+        
+        return position_map.get(config.position, (margin_x, img_h - wm_h - margin_y))
+    
+    def _preprocess_large_image(self, img: Image.Image) -> Image.Image:
+        """预处理大图片以优化内存使用"""
+        try:
+            print("预处理大图片...")
+            
+            # 如果图片过大，先进行质量优化但保持尺寸
+            # 这里主要是优化图片的内部结构而不是尺寸
+            if img.mode == 'RGBA':
+                # 检查是否真的需要Alpha通道
+                alpha_channel = img.split()[-1]
+                if alpha_channel.getextrema() == (255, 255):  # 完全不透明
+                    print("移除不必要的Alpha通道")
+                    img = img.convert('RGB')
+            
+            # 对于超大图片，使用内存映射模式
+            if hasattr(img, '_getexif'):
+                # 清除不必要的EXIF数据以节省内存
+                img.info.pop('exif', None)
+            
+            return img
+            
+        except Exception as e:
+            print(f"预处理失败，使用原图: {e}")
+            return img
+    
+    def _save_image(self, img: Image.Image, output_path: str, original_size: Tuple[int, int]):
+        """保存图片"""
+        try:
+            # 确保输出格式与颜色模式兼容
+            output_format = self._get_output_format(output_path)
+            
+            # 根据输出格式调整颜色模式
+            if output_format in ('JPEG', 'JPG'):
+                # JPEG不支持透明度，必须转换为RGB
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    if img.mode == 'RGBA':
+                        # 创建白色背景合成RGBA
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        background.paste(img, mask=img.split()[-1] if len(img.split()) == 4 else None)
+                        img = background
+                    else:
+                        img = img.convert('RGB')
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+            elif output_format == 'PNG':
+                # PNG支持透明度，保持原有模式或转换为RGBA
+                if img.mode not in ('RGB', 'RGBA', 'L', 'LA'):
+                    img = img.convert('RGBA')
+            else:
+                # 其他格式，安全转换为RGB
+                if img.mode != 'RGB':
+                    if img.mode == 'RGBA':
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        background.paste(img, mask=img.split()[-1])
+                        img = background
+                    else:
+                        img = img.convert('RGB')
+            
+            # 根据原始图片大小调整保存质量
+            total_pixels = original_size[0] * original_size[1]
+            if total_pixels > 50 * 1024 * 1024:  # 50MP以上
+                quality = 85
+                optimize = True
+            elif total_pixels > 20 * 1024 * 1024:  # 20MP以上
+                quality = 90
+                optimize = True
+            else:
+                quality = 95
+                optimize = False
+            
+            # 保存图片
+            if output_format in ('JPEG', 'JPG'):
+                img.save(output_path, 'JPEG', quality=quality, optimize=optimize)
+            elif output_format == 'PNG':
+                img.save(output_path, 'PNG', optimize=optimize)
+            else:
+                # 默认使用JPEG格式
+                img.save(output_path, 'JPEG', quality=quality, optimize=optimize)
+                
+        except Exception as e:
+            logger.error(f"保存图片失败: {e}")
+            logger.error(f"图片模式: {img.mode}, 输出路径: {output_path}")
+            logger.error(f"图片尺寸: {img.size}")
+            raise
+    
+    def _get_output_format(self, output_path: str) -> str:
+        """获取输出文件格式"""
+        ext = os.path.splitext(output_path.lower())[1]
+        format_map = {
+            '.jpg': 'JPEG',
+            '.jpeg': 'JPEG', 
+            '.png': 'PNG',
+            '.bmp': 'BMP',
+            '.tiff': 'TIFF',
+            '.tif': 'TIFF'
+        }
+        return format_map.get(ext, 'JPEG')  # 默认JPEG

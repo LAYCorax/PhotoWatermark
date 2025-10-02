@@ -1,0 +1,58 @@
+{
+  "application": {
+    "name": "PhotoWatermark",
+    "version": "1.0.0",
+    "author": "PhotoWatermark Team"
+  },
+  "default_watermark": {
+    "watermark_type": "text",
+    "position": "bottom_right",
+    "custom_x": 0,
+    "custom_y": 0,
+    "margin_x": 10,
+    "margin_y": 10,
+    "rotation": 0.0,
+    "text_config": {
+      "text": "Watermark",
+      "font_family": "Arial",
+      "font_size": 32,
+      "font_bold": false,
+      "font_italic": false,
+      "color": [255, 255, 255],
+      "opacity": 0.8,
+      "has_shadow": false,
+      "shadow_offset": [2, 2],
+      "shadow_color": [0, 0, 0],
+      "has_outline": false,
+      "outline_width": 1,
+      "outline_color": [0, 0, 0]
+    },
+    "image_config": {
+      "image_path": "",
+      "scale": 1.0,
+      "opacity": 0.8,
+      "maintain_aspect_ratio": true
+    }
+  },
+  "export_settings": {
+    "default_format": "PNG",
+    "jpeg_quality": 95,
+    "naming_rule": "suffix",
+    "name_prefix": "wm_",
+    "name_suffix": "_watermarked",
+    "prevent_overwrite": true
+  },
+  "ui_settings": {
+    "window_width": 1400,
+    "window_height": 900,
+    "splitter_sizes": [300, 600, 300],
+    "remember_window_state": true,
+    "theme": "light"
+  },
+  "performance": {
+    "thumbnail_size": [100, 100],
+    "max_preview_size": [1920, 1080],
+    "async_thumbnail_generation": true,
+    "cache_thumbnails": true
+  }
+}

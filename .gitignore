@@ -206,3 +206,66 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# PhotoWatermark Application Specific
+logs/
+*.log
+temp_thumbnails/
+output/
+exports/
+
+# Configuration files with sensitive data
+config/user_config.json
+config/secrets.json
+
+# Temporary files
+*.tmp
+*.temp
+temp_*
+
+# Large test files and sample images
+test_images/
+sample_images/
+large_test_files/
+tests/*.jpg
+tests/*.png
+tests/*.gif
+tests/*.bmp
+tests/*.tiff
+
+# Build artifacts specific to PhotoWatermark
+photo_watermark.spec
+*.spec
+
+# Development and diagnostic scripts
+scripts/test_*.py
+scripts/create_*.py
+scripts/font_system_info.py
+scripts/debug_*.py
+
+# Development reports and documentation
+docs/reports/*.py
+*.report.py
+
+# IDE and editor specific
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# PyInstaller build artifacts
+dist/
+build/
+*.exe
+*.dmg
+*.pkg
+
+# Memory dumps and crash logs
+*.dmp
+crash_*.log
