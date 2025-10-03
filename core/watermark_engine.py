@@ -6,6 +6,7 @@ import os
 from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from models.watermark_config import WatermarkConfig, WatermarkType, WatermarkPosition
+from core.advanced_text_renderer import AdvancedTextRenderer
 from utils.logger import logger, log_exception, log_performance
 
 
@@ -18,6 +19,7 @@ class WatermarkEngine:
         self.max_overlay_size = 1000 * 1000  # 降低最大overlay像素数
         self.memory_conservative_mode = False
         self.ultra_conservative_mode = False  # 超保守模式，针对大文件
+        self.advanced_text_renderer = AdvancedTextRenderer()  # Advanced text effects renderer
         logger.debug(f"水印引擎参数: max_dimension={self.max_image_dimension}, max_overlay={self.max_overlay_size}")
     
     @log_performance
@@ -119,12 +121,67 @@ class WatermarkEngine:
     def _apply_text_watermark_optimized(self, img: Image.Image, config: WatermarkConfig) -> Image.Image:
         """优化的文本水印处理"""
         try:
-            logger.debug("开始应用文本水印")
+            logger.info(f"导出: 开始应用文本水印 - 原图尺寸: {img.size[0]}x{img.size[1]}")
+            text_config = config.text_config
+            text = text_config.text
+            logger.info(f"导出: 水印文本: '{text}', 字体: {text_config.font_family}, 大小: {text_config.font_size}, 粗体: {text_config.font_bold}, 斜体: {text_config.font_italic}")
+            logger.info(f"导出: 水印位置: {config.position}, custom_x={config.custom_x}, custom_y={config.custom_y}")
+            
+            # Check if advanced effects are enabled
+            has_advanced_effects = (
+                text_config.has_shadow or
+                text_config.has_outline
+            )
+            
+            # Also use advanced renderer for styled fonts (bold, italic, or both) to ensure proper rendering
+            has_styled_font = (
+                text_config.font_bold or 
+                text_config.font_italic
+            )
+            
+            # Allow advanced renderer for styled fonts even in conservative modes
+            use_advanced_renderer = (
+                has_advanced_effects or 
+                (has_styled_font and not (self.ultra_conservative_mode and has_advanced_effects))
+            )
+            
+            if use_advanced_renderer:
+                if has_styled_font and not has_advanced_effects:
+                    logger.info(f"导出: 使用高级渲染器处理样式字体 - 粗体:{text_config.font_bold}, 斜体:{text_config.font_italic}")
+                else:
+                    logger.info(f"导出: 使用高级文本效果渲染器 - 阴影:{text_config.has_shadow}, 描边:{text_config.has_outline}")
+                # Load font first to get accurate text dimensions
+                font = self._load_font(text_config.font_family, text_config.font_size, text_config.font_bold, text_config.font_italic)
+                
+                # Get accurate text dimensions
+                temp_img = Image.new('RGB', (1, 1))
+                temp_draw = ImageDraw.Draw(temp_img)
+                try:
+                    bbox = temp_draw.textbbox((0, 0), text, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                except (AttributeError, TypeError):
+                    try:
+                        text_width, text_height = font.getsize(text)
+                    except AttributeError:
+                        text_width = len(text) * text_config.font_size // 2
+                        text_height = text_config.font_size
+                
+                # Calculate position using accurate dimensions
+                x, y = self._calculate_position(
+                    img.size[0], img.size[1], text_width, text_height, config
+                )
+                logger.info(f"导出: 文本尺寸({text_width}x{text_height}), 最终位置({x},{y})")
+                # Use advanced renderer for styled fonts with effects
+                return self.advanced_text_renderer.render_text_with_effects(
+                    img, text_config, (x, y), text, config.rotation
+                )
+            
+            # Fallback to original rendering for simple text or conservative mode
+            logger.info(f"导出: 使用基础文本渲染 - 粗体:{config.text_config.font_bold}, 斜体:{config.text_config.font_italic}")
             # 加载字体
-            logger.debug(f"加载字体: {config.text_config.font_family}, 大小: {config.text_config.font_size}")
-            font = self._load_font(config.text_config.font_family, config.text_config.font_size)
-            text = config.text_config.text
-            logger.debug(f"水印文本: '{text}'")
+            logger.debug(f"加载字体: {config.text_config.font_family}, 大小: {config.text_config.font_size}, 粗体: {config.text_config.font_bold}, 斜体: {config.text_config.font_italic}")
+            font = self._load_font(config.text_config.font_family, config.text_config.font_size, config.text_config.font_bold, config.text_config.font_italic)
             
             # 获取文本尺寸
             temp_img = Image.new('RGB', (1, 1))
@@ -146,6 +203,8 @@ class WatermarkEngine:
                 img.size[0], img.size[1], text_width, text_height, config
             )
             
+            logger.info(f"导出: 文本尺寸({text_width}x{text_height}), 最终位置({x},{y})")
+            
             # 选择渲染模式
             if self.ultra_conservative_mode:
                 logger.info("使用超保守直接绘制模式")
@@ -159,6 +218,7 @@ class WatermarkEngine:
                 
         except Exception as e:
             print(f"文本水印处理失败: {e}")
+            logger.error(f"文本水印处理失败: {e}")
             return img
     
     def _draw_text_direct(self, img: Image.Image, text: str, font: ImageFont.FreeTypeFont,
@@ -283,10 +343,30 @@ class WatermarkEngine:
                     if watermark_img.mode != 'RGBA':
                         watermark_img = watermark_img.convert('RGBA')
                     
-                    # 应用透明度
-                    alpha = int(config.image_config.opacity * 255)
-                    alpha_channel = Image.new('L', watermark_img.size, alpha)
-                    watermark_img.putalpha(alpha_channel)
+                    # 应用透明度，保留现有alpha通道
+                    opacity = config.image_config.opacity
+                    if opacity < 1.0:
+                        # 获取现有alpha通道
+                        r, g, b, a = watermark_img.split()
+                        # 将现有alpha乘以不透明度因子
+                        a = a.point(lambda x: int(x * opacity))
+                        # 合并回去
+                        watermark_img = Image.merge('RGBA', (r, g, b, a))
+                    
+                    # 应用旋转
+                    if config.rotation != 0:
+                        watermark_img = watermark_img.rotate(
+                            config.rotation,
+                            resample=Image.BICUBIC,
+                            expand=True,
+                            fillcolor=(0, 0, 0, 0)
+                        )
+                        # 重新计算位置
+                        x, y = self._calculate_position(
+                            img.size[0], img.size[1],
+                            watermark_img.size[0], watermark_img.size[1],
+                            config
+                        )
                     
                     if img.mode != 'RGBA':
                         img = img.convert('RGBA')
@@ -306,24 +386,62 @@ class WatermarkEngine:
             print(f"图片水印处理失败: {e}")
             return img
     
-    def _load_font(self, font_family: str, font_size: int) -> ImageFont.FreeTypeFont:
-        """加载字体"""
-        font_paths = [
-            font_family,
-            "arial.ttf",
-            "Arial",
+    def _load_font(self, font_family: str, font_size: int, bold: bool = False, italic: bool = False) -> ImageFont.FreeTypeFont:
+        """加载字体，支持粗体和斜体"""
+        font_paths = []
+        
+        # Build font paths based on style requirements
+        if font_family == "Microsoft YaHei UI" or font_family == "Microsoft YaHei":
+            if bold and italic:
+                # For bold+italic combination, try Arial bold italic first, then YaHei bold
+                font_paths.extend(["C:/Windows/Fonts/arialbi.ttf", "arialbi.ttf", "C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"])
+            elif bold:
+                font_paths.extend(["C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"])
+            elif italic:
+                # YaHei doesn't have separate italic, use Arial italic as fallback
+                font_paths.extend(["C:/Windows/Fonts/ariali.ttf", "C:/Windows/Fonts/msyh.ttc", "msyh.ttc", "ariali.ttf"])
+            else:
+                font_paths.extend(["C:/Windows/Fonts/msyh.ttc", "msyh.ttc"])
+        elif font_family == "Arial":
+            if bold and italic:
+                font_paths.extend(["C:/Windows/Fonts/arialbi.ttf", "arialbi.ttf"])
+            elif bold:
+                font_paths.extend(["C:/Windows/Fonts/arialbd.ttf", "arialbd.ttf"])
+            elif italic:
+                font_paths.extend(["C:/Windows/Fonts/ariali.ttf", "ariali.ttf"])
+            else:
+                font_paths.extend(["C:/Windows/Fonts/arial.ttf", "arial.ttf"])
+        elif font_family == "Times New Roman":
+            if bold and italic:
+                font_paths.extend(["C:/Windows/Fonts/timesbi.ttf", "timesbi.ttf"])
+            elif bold:
+                font_paths.extend(["C:/Windows/Fonts/timesbd.ttf", "timesbd.ttf"])
+            elif italic:
+                font_paths.extend(["C:/Windows/Fonts/timesi.ttf", "timesi.ttf"])
+            else:
+                font_paths.extend(["C:/Windows/Fonts/times.ttf", "times.ttf"])
+        
+        # Fallback fonts
+        font_paths.extend([
             "C:/Windows/Fonts/arial.ttf",
-            "C:/Windows/Fonts/calibri.ttf",
+            "C:/Windows/Fonts/calibri.ttf", 
             "C:/Windows/Fonts/simsun.ttc",
-            "C:/Windows/Fonts/msyh.ttc"
-        ]
+            "C:/Windows/Fonts/msyh.ttc",
+            "arial.ttf",
+            "calibri.ttf",
+            "simsun.ttc",
+            "msyh.ttc"
+        ])
         
         for font_path in font_paths:
             try:
-                return ImageFont.truetype(font_path, font_size)
+                font = ImageFont.truetype(font_path, font_size)
+                logger.debug(f"成功加载字体: {font_path} (粗体:{bold}, 斜体:{italic})")
+                return font
             except (OSError, IOError):
                 continue
         
+        logger.warning(f"无法加载字体 {font_family}，使用默认字体")
         return ImageFont.load_default()
     
     def _calculate_position(self, img_w: int, img_h: int, wm_w: int, wm_h: int,

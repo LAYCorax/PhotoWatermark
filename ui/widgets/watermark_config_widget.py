@@ -13,7 +13,7 @@ try:
         QGridLayout
     )
     from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-    from PyQt5.QtGui import QFont, QColor, QPalette
+    from PyQt5.QtGui import QFont, QColor, QPalette, QFontDatabase
 except ImportError:
     print("PyQt5 is required but not installed.")
     raise
@@ -103,10 +103,52 @@ class TextWatermarkWidget(QWidget):
         # Font family
         font_layout.addWidget(QLabel("字体:"), 0, 0)
         self.font_combo = QComboBox()
-        self.font_combo.addItems([
-            "Arial", "Times New Roman", "Helvetica", "SimSun", "Microsoft YaHei",
-            "SimHei", "KaiTi", "FangSong"
-        ])
+        self.font_combo.setEditable(False)  # 设置为不可编辑，只能选择
+        self.font_combo.setMaxVisibleItems(20)  # 设置下拉列表最多显示20项
+        
+        # 设置下拉框样式，增强选中状态的可见性，移除hover白色效果
+        self.font_combo.setStyleSheet("""
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+                background: white;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                selection-color: black;
+                background: white;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                padding: 6px 10px;
+                min-height: 25px;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background: #3498db;
+                color: black;
+            }
+            QComboBox QAbstractItemView::item:hover:!selected {
+                background: #e8f4f8;
+                color: black;
+            }
+        """)
+        
+        # 获取系统所有可用字体，按字母顺序排序
+        font_db = QFontDatabase()
+        system_fonts = sorted(font_db.families())
+        
+        # 添加所有系统字体（支持滚动）
+        for font in system_fonts:
+            self.font_combo.addItem(font)
+
         font_layout.addWidget(self.font_combo, 0, 1)
         
         # Font size
@@ -142,7 +184,7 @@ class TextWatermarkWidget(QWidget):
         appearance_layout.addWidget(self.color_button, 0, 1)
         
         # Opacity
-        appearance_layout.addWidget(QLabel("透明度:"), 1, 0)
+        appearance_layout.addWidget(QLabel("不透明度:"), 1, 0)
         opacity_layout = QHBoxLayout()
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 100)
@@ -153,18 +195,123 @@ class TextWatermarkWidget(QWidget):
         
         layout.addWidget(appearance_group)
         
-        # Advanced effects (placeholder for future implementation)
-        effects_group = QGroupBox("特效设置 (高级功能)")
-        effects_layout = QVBoxLayout(effects_group)
+        # Text effects
+        effects_group = QGroupBox("文字特效")
+        effects_layout = QGridLayout(effects_group)
         
+        # Shadow effect
         self.shadow_checkbox = QCheckBox("阴影")
-        self.outline_checkbox = QCheckBox("描边")
-        effects_layout.addWidget(self.shadow_checkbox)
-        effects_layout.addWidget(self.outline_checkbox)
+        effects_layout.addWidget(self.shadow_checkbox, 0, 0, 1, 2)  # Span 2 columns
         
-        effects_note = QLabel("特效功能将在后续版本中实现")
-        effects_note.setStyleSheet("color: #888; font-style: italic;")
-        effects_layout.addWidget(effects_note)
+        # Shadow settings with each property on separate lines
+        shadow_settings_widget = QWidget()
+        shadow_settings_layout = QVBoxLayout(shadow_settings_widget)
+        shadow_settings_layout.setContentsMargins(20, 5, 5, 5)  # Add left margin for indentation
+        shadow_settings_layout.setSpacing(5)
+        
+        # Color line
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel("颜色:"))
+        self.shadow_color_button = ColorButton((0, 0, 0))
+        color_layout.addWidget(self.shadow_color_button)
+        color_layout.addStretch()
+        shadow_settings_layout.addLayout(color_layout)
+        
+        # Offset line
+        offset_layout = QHBoxLayout()
+        offset_layout.addWidget(QLabel("偏移 X:"))
+        self.shadow_x_spinbox = QSpinBox()
+        self.shadow_x_spinbox.setRange(-20, 20)
+        self.shadow_x_spinbox.setValue(3)
+        self.shadow_x_spinbox.setMaximumWidth(60)
+        offset_layout.addWidget(self.shadow_x_spinbox)
+        offset_layout.addWidget(QLabel("Y:"))
+        self.shadow_y_spinbox = QSpinBox()
+        self.shadow_y_spinbox.setRange(-20, 20)
+        self.shadow_y_spinbox.setValue(3)
+        self.shadow_y_spinbox.setMaximumWidth(60)
+        offset_layout.addWidget(self.shadow_y_spinbox)
+        offset_layout.addStretch()
+        shadow_settings_layout.addLayout(offset_layout)
+        
+        # Opacity line with slider
+        opacity_layout = QHBoxLayout()
+        opacity_layout.addWidget(QLabel("不透明度:"))
+        
+        # Add slider for shadow opacity
+        self.shadow_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.shadow_opacity_slider.setRange(0, 100)
+        self.shadow_opacity_slider.setValue(60)
+        self.shadow_opacity_slider.setMinimumWidth(120)
+        opacity_layout.addWidget(self.shadow_opacity_slider)
+        
+        # Keep spinbox for precise control
+        self.shadow_opacity_spinbox = QSpinBox()
+        self.shadow_opacity_spinbox.setRange(0, 100)
+        self.shadow_opacity_spinbox.setValue(60)
+        self.shadow_opacity_spinbox.setSuffix("%")
+        self.shadow_opacity_spinbox.setMaximumWidth(80)
+        opacity_layout.addWidget(self.shadow_opacity_spinbox)
+        opacity_layout.addStretch()
+        shadow_settings_layout.addLayout(opacity_layout)
+        
+        effects_layout.addWidget(shadow_settings_widget, 1, 0, 1, 2)  # Span 2 columns
+        
+        # Outline effect
+        self.outline_checkbox = QCheckBox("描边")
+        effects_layout.addWidget(self.outline_checkbox, 2, 0, 1, 2)  # Span 2 columns
+        
+        # Outline settings with each property on separate lines
+        outline_settings_widget = QWidget()
+        outline_settings_layout = QVBoxLayout(outline_settings_widget)
+        outline_settings_layout.setContentsMargins(20, 5, 5, 5)  # Add left margin for indentation
+        outline_settings_layout.setSpacing(5)
+        
+        # Color line
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel("颜色:"))
+        self.outline_color_button = ColorButton((0, 0, 0))
+        color_layout.addWidget(self.outline_color_button)
+        color_layout.addStretch()
+        outline_settings_layout.addLayout(color_layout)
+        
+        # Width line
+        width_layout = QHBoxLayout()
+        width_layout.addWidget(QLabel("宽度:"))
+        self.outline_width_spinbox = QSpinBox()
+        self.outline_width_spinbox.setRange(1, 10)
+        self.outline_width_spinbox.setValue(2)
+        self.outline_width_spinbox.setMaximumWidth(60)
+        width_layout.addWidget(self.outline_width_spinbox)
+        width_layout.addStretch()
+        outline_settings_layout.addLayout(width_layout)
+        
+        # Opacity line with slider
+        opacity_layout = QHBoxLayout()
+        opacity_layout.addWidget(QLabel("不透明度:"))
+        
+        # Add slider for outline opacity
+        self.outline_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.outline_opacity_slider.setRange(0, 100)
+        self.outline_opacity_slider.setValue(100)
+        self.outline_opacity_slider.setMinimumWidth(120)
+        opacity_layout.addWidget(self.outline_opacity_slider)
+        
+        # Keep spinbox for precise control
+        self.outline_opacity_spinbox = QSpinBox()
+        self.outline_opacity_spinbox.setRange(0, 100)
+        self.outline_opacity_spinbox.setValue(100)
+        self.outline_opacity_spinbox.setSuffix("%")
+        self.outline_opacity_spinbox.setMaximumWidth(80)
+        opacity_layout.addWidget(self.outline_opacity_spinbox)
+        opacity_layout.addStretch()
+        outline_settings_layout.addLayout(opacity_layout)
+        
+        effects_layout.addWidget(outline_settings_widget, 3, 0, 1, 2)  # Span 2 columns
+        
+        # Initially disable effect controls
+        self._toggle_shadow_controls(False)
+        self._toggle_outline_controls(False)
         
         layout.addWidget(effects_group)
         layout.addStretch()
@@ -179,6 +326,21 @@ class TextWatermarkWidget(QWidget):
         self.italic_checkbox.toggled.connect(self.on_italic_changed)
         self.color_button.color_changed.connect(self.on_color_changed)
         self.opacity_slider.valueChanged.connect(self.on_opacity_changed)
+        
+        # Shadow and outline connections
+        self.shadow_checkbox.toggled.connect(self.on_shadow_toggled)
+        self.shadow_color_button.color_changed.connect(self.on_shadow_color_changed)
+        self.shadow_x_spinbox.valueChanged.connect(self.on_shadow_offset_changed)
+        self.shadow_y_spinbox.valueChanged.connect(self.on_shadow_offset_changed)
+        
+        self.outline_checkbox.toggled.connect(self.on_outline_toggled)
+        self.outline_color_button.color_changed.connect(self.on_outline_color_changed)
+        self.outline_width_spinbox.valueChanged.connect(self.on_outline_width_changed)
+        self.outline_opacity_spinbox.valueChanged.connect(self.on_outline_opacity_changed)
+        self.outline_opacity_slider.valueChanged.connect(self.on_outline_opacity_slider_changed)
+        
+        self.shadow_opacity_spinbox.valueChanged.connect(self.on_shadow_opacity_changed)
+        self.shadow_opacity_slider.valueChanged.connect(self.on_shadow_opacity_slider_changed)
     
     def update_ui_from_config(self):
         """Update UI controls from configuration"""
@@ -198,6 +360,25 @@ class TextWatermarkWidget(QWidget):
         opacity_percent = int(self.config.opacity * 100)
         self.opacity_slider.setValue(opacity_percent)
         self.opacity_label.setText(f"{opacity_percent}%")
+        
+        # Update shadow settings
+        self.shadow_checkbox.setChecked(self.config.has_shadow)
+        self.shadow_color_button.set_color(self.config.shadow_color)
+        self.shadow_x_spinbox.setValue(self.config.shadow_offset[0])
+        self.shadow_y_spinbox.setValue(self.config.shadow_offset[1])
+        shadow_opacity_percent = int(self.config.shadow_opacity * 100)
+        self.shadow_opacity_spinbox.setValue(shadow_opacity_percent)
+        self.shadow_opacity_slider.setValue(shadow_opacity_percent)
+        self._toggle_shadow_controls(self.config.has_shadow)
+        
+        # Update outline settings
+        self.outline_checkbox.setChecked(self.config.has_outline)
+        self.outline_color_button.set_color(self.config.outline_color)
+        self.outline_width_spinbox.setValue(self.config.outline_width)
+        outline_opacity_percent = int(self.config.outline_opacity * 100)
+        self.outline_opacity_spinbox.setValue(outline_opacity_percent)
+        self.outline_opacity_slider.setValue(outline_opacity_percent)
+        self._toggle_outline_controls(self.config.has_outline)
     
     @pyqtSlot(str)
     def on_text_changed(self, text: str):
@@ -253,6 +434,97 @@ class TextWatermarkWidget(QWidget):
         self.config.opacity = value / 100.0
         self.opacity_label.setText(f"{value}%")
         self.config_changed.emit()
+    
+    @pyqtSlot(bool)
+    def on_shadow_toggled(self, enabled: bool):
+        """Handle shadow toggle"""
+        self.config.has_shadow = enabled
+        self._toggle_shadow_controls(enabled)
+        self.config_changed.emit()
+    
+    def on_shadow_color_changed(self, color: tuple):
+        """Handle shadow color change"""
+        self.config.shadow_color = color
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_shadow_offset_changed(self, value: int):
+        """Handle shadow offset change"""
+        self.config.shadow_offset = (self.shadow_x_spinbox.value(), self.shadow_y_spinbox.value())
+        self.config_changed.emit()
+    
+    @pyqtSlot(bool)
+    def on_outline_toggled(self, enabled: bool):
+        """Handle outline toggle"""
+        self.config.has_outline = enabled
+        self._toggle_outline_controls(enabled)
+        self.config_changed.emit()
+    
+    def on_outline_color_changed(self, color: tuple):
+        """Handle outline color change"""
+        self.config.outline_color = color
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_outline_width_changed(self, value: int):
+        """Handle outline width change"""
+        self.config.outline_width = value
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_shadow_opacity_changed(self, value: int):
+        """Handle shadow opacity spinbox change"""
+        self.config.shadow_opacity = value / 100.0
+        # Sync slider without triggering signal
+        self.shadow_opacity_slider.blockSignals(True)
+        self.shadow_opacity_slider.setValue(value)
+        self.shadow_opacity_slider.blockSignals(False)
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_shadow_opacity_slider_changed(self, value: int):
+        """Handle shadow opacity slider change"""
+        self.config.shadow_opacity = value / 100.0
+        # Sync spinbox without triggering signal
+        self.shadow_opacity_spinbox.blockSignals(True)
+        self.shadow_opacity_spinbox.setValue(value)
+        self.shadow_opacity_spinbox.blockSignals(False)
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_outline_opacity_changed(self, value: int):
+        """Handle outline opacity spinbox change"""
+        self.config.outline_opacity = value / 100.0
+        # Sync slider without triggering signal
+        self.outline_opacity_slider.blockSignals(True)
+        self.outline_opacity_slider.setValue(value)
+        self.outline_opacity_slider.blockSignals(False)
+        self.config_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_outline_opacity_slider_changed(self, value: int):
+        """Handle outline opacity slider change"""
+        self.config.outline_opacity = value / 100.0
+        # Sync spinbox without triggering signal
+        self.outline_opacity_spinbox.blockSignals(True)
+        self.outline_opacity_spinbox.setValue(value)
+        self.outline_opacity_spinbox.blockSignals(False)
+        self.config_changed.emit()
+    
+    def _toggle_shadow_controls(self, enabled: bool):
+        """Enable/disable shadow controls"""
+        self.shadow_color_button.setEnabled(enabled)
+        self.shadow_x_spinbox.setEnabled(enabled)
+        self.shadow_y_spinbox.setEnabled(enabled)
+        self.shadow_opacity_spinbox.setEnabled(enabled)
+        self.shadow_opacity_slider.setEnabled(enabled)
+    
+    def _toggle_outline_controls(self, enabled: bool):
+        """Enable/disable outline controls"""
+        self.outline_color_button.setEnabled(enabled)
+        self.outline_width_spinbox.setEnabled(enabled)
+        self.outline_opacity_spinbox.setEnabled(enabled)
+        self.outline_opacity_slider.setEnabled(enabled)
 
 
 class ImageWatermarkWidget(QWidget):
@@ -317,7 +589,7 @@ class ImageWatermarkWidget(QWidget):
         layout.addWidget(scale_group)
         
         # Opacity
-        opacity_group = QGroupBox("透明度")
+        opacity_group = QGroupBox("不透明度")
         opacity_layout = QHBoxLayout(opacity_group)
         
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -437,6 +709,12 @@ class PositionWidget(QWidget):
             button.setProperty("position", position)
             self.position_buttons.addButton(button, i)
             preset_layout.addWidget(button, i // 3, i % 3)
+            # set center as default checked
+            if position == WatermarkPosition.CENTER:
+                button.setChecked(True)
+                self.config.position = WatermarkPosition.CENTER
+            else:
+                button.setChecked(False)
         
         layout.addWidget(preset_group)
         
@@ -458,29 +736,52 @@ class PositionWidget(QWidget):
         
         layout.addWidget(margin_group)
         
-        # Custom position (placeholder)
-        custom_group = QGroupBox("自定义位置 (高级功能)")
-        custom_layout = QGridLayout(custom_group)
+        # Rotation control
+        rotation_group = QGroupBox("旋转")
+        rotation_layout = QVBoxLayout(rotation_group)
         
-        custom_layout.addWidget(QLabel("X:"), 0, 0)
-        self.custom_x_spinbox = QSpinBox()
-        self.custom_x_spinbox.setRange(0, 9999)
-        self.custom_x_spinbox.setSuffix(" px")
-        self.custom_x_spinbox.setEnabled(False)
-        custom_layout.addWidget(self.custom_x_spinbox, 0, 1)
+        rotation_control_layout = QHBoxLayout()
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setRange(-180, 180)
+        self.rotation_slider.setValue(0)
+        self.rotation_slider.setTickPosition(QSlider.TicksBelow)
+        self.rotation_slider.setTickInterval(45)
+        rotation_control_layout.addWidget(self.rotation_slider)
         
-        custom_layout.addWidget(QLabel("Y:"), 1, 0)
-        self.custom_y_spinbox = QSpinBox()
-        self.custom_y_spinbox.setRange(0, 9999)
-        self.custom_y_spinbox.setSuffix(" px")
-        self.custom_y_spinbox.setEnabled(False)
-        custom_layout.addWidget(self.custom_y_spinbox, 1, 1)
+        self.rotation_spinbox = QSpinBox()
+        self.rotation_spinbox.setRange(-180, 180)
+        self.rotation_spinbox.setSuffix("°")
+        self.rotation_spinbox.setValue(0)
+        self.rotation_spinbox.setFixedWidth(80)
+        rotation_control_layout.addWidget(self.rotation_spinbox)
         
-        custom_note = QLabel("拖拽定位功能将在后续版本实现")
-        custom_note.setStyleSheet("color: #888; font-style: italic;")
-        custom_layout.addWidget(custom_note, 2, 0, 1, 2)
+        rotation_layout.addLayout(rotation_control_layout)
         
-        layout.addWidget(custom_group)
+        rotation_note = QLabel("提示：以水印中心点旋转")
+        rotation_note.setStyleSheet("color: #666; font-size: 11px; font-style: italic;")
+        rotation_layout.addWidget(rotation_note)
+        
+        layout.addWidget(rotation_group)
+        
+        # Drag position hint
+        drag_hint_group = QGroupBox("自定义位置")
+        drag_hint_layout = QVBoxLayout(drag_hint_group)
+        
+        drag_hint_label = QLabel("💡 在预览区域按住 Ctrl + 拖拽水印可自定义位置")
+        drag_hint_label.setStyleSheet("""
+            QLabel {
+                color: #2c3e50;
+                font-size: 12px;
+                padding: 8px;
+                background-color: #e8f4f8;
+                border-radius: 4px;
+                border-left: 3px solid #3498db;
+            }
+        """)
+        drag_hint_label.setWordWrap(True)
+        drag_hint_layout.addWidget(drag_hint_label)
+        
+        layout.addWidget(drag_hint_group)
         layout.addStretch()
     
     def setup_connections(self):
@@ -488,6 +789,8 @@ class PositionWidget(QWidget):
         self.position_buttons.buttonClicked.connect(self.on_position_changed)
         self.margin_x_spinbox.valueChanged.connect(self.on_margin_x_changed)
         self.margin_y_spinbox.valueChanged.connect(self.on_margin_y_changed)
+        self.rotation_slider.valueChanged.connect(self.on_rotation_slider_changed)
+        self.rotation_spinbox.valueChanged.connect(self.on_rotation_spinbox_changed)
     
     def update_ui_from_config(self):
         """Update UI from configuration"""
@@ -499,6 +802,15 @@ class PositionWidget(QWidget):
         
         self.margin_x_spinbox.setValue(self.config.margin_x)
         self.margin_y_spinbox.setValue(self.config.margin_y)
+        
+        # Set rotation
+        rotation_degrees = int(self.config.rotation)
+        self.rotation_slider.blockSignals(True)
+        self.rotation_spinbox.blockSignals(True)
+        self.rotation_slider.setValue(rotation_degrees)
+        self.rotation_spinbox.setValue(rotation_degrees)
+        self.rotation_slider.blockSignals(False)
+        self.rotation_spinbox.blockSignals(False)
     
     @pyqtSlot()
     def on_position_changed(self):
@@ -518,6 +830,35 @@ class PositionWidget(QWidget):
     def on_margin_y_changed(self, value: int):
         """Handle vertical margin change"""
         self.config.margin_y = value
+        self.position_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_rotation_slider_changed(self, value: int):
+        """Handle rotation slider change"""
+        self.rotation_spinbox.blockSignals(True)
+        self.rotation_spinbox.setValue(value)
+        self.rotation_spinbox.blockSignals(False)
+        self.config.rotation = float(value)
+        self.position_changed.emit()
+    
+    @pyqtSlot(int)
+    def on_rotation_spinbox_changed(self, value: int):
+        """Handle rotation spinbox change"""
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(value)
+        self.rotation_slider.blockSignals(False)
+        self.config.rotation = float(value)
+        self.position_changed.emit()
+    
+    @pyqtSlot(int, int)
+    def on_drag_position_changed(self, x: int, y: int):
+        """Handle drag position change from preview"""
+        # Update config to custom position
+        self.config.position = WatermarkPosition.CUSTOM
+        self.config.custom_x = x
+        self.config.custom_y = y
+        
+        # Emit signal to update preview
         self.position_changed.emit()
 
 
@@ -589,25 +930,15 @@ class WatermarkConfigWidget(QWidget):
         # Text watermark tab
         self.text_widget = TextWatermarkWidget(self.config.text_config)
         self.tab_widget.addTab(self.text_widget, "文本设置")
-        
+
         # Image watermark tab
         self.image_widget = ImageWatermarkWidget(self.config.image_config)
-        self.tab_widget.addTab(self.image_widget, "图片设置")
-        
-        # Position tab
+        self.tab_widget.addTab(self.image_widget, "图片设置")        # Position tab
         self.position_widget = PositionWidget(self.config)
         self.tab_widget.addTab(self.position_widget, "位置设置")
         
         layout.addWidget(self.tab_widget)
         
-        # Reset button
-        reset_layout = QHBoxLayout()
-        reset_layout.addStretch()
-        self.reset_btn = QPushButton("重置设置")
-        self.reset_btn.setFixedWidth(80)
-        reset_layout.addWidget(self.reset_btn)
-        layout.addLayout(reset_layout)
-    
     def setup_connections(self):
         """Setup signal connections"""
         self.text_radio.toggled.connect(self.on_type_changed)
@@ -615,7 +946,6 @@ class WatermarkConfigWidget(QWidget):
         self.text_widget.config_changed.connect(self.config_changed)
         self.image_widget.config_changed.connect(self.config_changed)
         self.position_widget.position_changed.connect(self.config_changed)
-        self.reset_btn.clicked.connect(self.reset_config)
     
     def update_ui_from_config(self):
         """Update UI from configuration"""
@@ -631,11 +961,11 @@ class WatermarkConfigWidget(QWidget):
     def update_tab_visibility(self):
         """Update tab visibility based on watermark type"""
         if self.config.watermark_type == WatermarkType.TEXT:
-            self.tab_widget.setTabEnabled(0, True)
-            self.tab_widget.setTabEnabled(1, False)
+            self.tab_widget.setTabEnabled(0, True)   # Text settings
+            self.tab_widget.setTabEnabled(1, False)  # Image settings
         else:
-            self.tab_widget.setTabEnabled(0, False)
-            self.tab_widget.setTabEnabled(1, True)
+            self.tab_widget.setTabEnabled(0, False)  # Text settings
+            self.tab_widget.setTabEnabled(1, True)   # Image settings
     
     @pyqtSlot()
     def on_type_changed(self):
@@ -664,11 +994,3 @@ class WatermarkConfigWidget(QWidget):
     def update_config(self):
         """Update UI when config is changed externally"""
         self.update_ui_from_config()
-    
-    @pyqtSlot()
-    def reset_config(self):
-        """Reset configuration to defaults"""
-        from models.watermark_config import WatermarkConfig
-        new_config = WatermarkConfig()
-        self.set_config(new_config)
-        self.config_changed.emit()

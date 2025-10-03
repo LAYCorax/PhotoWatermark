@@ -29,6 +29,9 @@ from core.watermark_engine import WatermarkEngine
 from utils.logger import logger, log_exception, log_performance
 from ui.dialogs.watermark_progress_dialog import WatermarkProgressDialog
 from ui.dialogs.file_import_progress_dialog import FileImportProgressDialog
+from ui.dialogs.export_settings_dialog import ExportSettingsDialog
+from ui.dialogs.export_progress_dialog import ExportProgressDialog
+from core.batch_export_engine import BatchExportEngine
 
 
 class MainWindow(QMainWindow):
@@ -106,15 +109,11 @@ class MainWindow(QMainWindow):
         watermark_menu = menubar.addMenu('水印(&W)')
         watermark_menu.addAction('文本水印', self.set_text_watermark)
         watermark_menu.addAction('图片水印', self.set_image_watermark)
-        watermark_menu.addSeparator()
-        watermark_menu.addAction('重置设置', self.reset_watermark_config)
         
         # Export menu
         export_menu = menubar.addMenu('导出(&E)')
         export_menu.addAction('导出选中图片...', self.export_selected, 'Ctrl+E')
         export_menu.addAction('导出所有图片...', self.export_all, 'Ctrl+Shift+E')
-        export_menu.addSeparator()
-        export_menu.addAction('导出设置...', self.show_export_settings)
         
         # Tools menu
         tools_menu = menubar.addMenu('工具(&T)')
@@ -195,6 +194,11 @@ class MainWindow(QMainWindow):
         
         # Config widget signals
         self.config_widget.config_changed.connect(self.on_config_changed)
+        
+        # Preview widget drag position signals
+        self.preview_widget.preview_view.watermark_position_changed.connect(
+            self.config_widget.position_widget.on_drag_position_changed
+        )
     
     def center_window(self):
         """Center the window on screen"""
@@ -442,23 +446,90 @@ class MainWindow(QMainWindow):
         logger.debug(f"图片水印配置: {self.watermark_config.image_config.image_path}")
         self.ready_label.setText("已切换到图片水印模式")
     
-    def reset_watermark_config(self):
-        """Reset watermark configuration"""
-        self.watermark_config = WatermarkConfig()
-        self.config_widget.set_config(self.watermark_config)
-        self.ready_label.setText("水印配置已重置")
-    
     def export_selected(self):
         """Export selected images"""
-        self._export_images(selected_only=True)
+        selected_images = self.image_list_widget.get_selected_images()
+        if not selected_images:
+            QMessageBox.information(self, "提示", "请先选择要导出的图片")
+            return
+        
+        # 显示导出设置对话框
+        dialog = ExportSettingsDialog(len(selected_images), self)
+        dialog.export_requested.connect(lambda config: self.start_batch_export(selected_images, config))
+        dialog.exec_()
     
     def export_all(self):
-        """Export all images"""
-        self._export_images(selected_only=False)
+        """Export all images"""  
+        all_images = self.image_list_model.get_all_images()
+        if not all_images:
+            QMessageBox.information(self, "提示", "请先导入图片")
+            return
+            
+        # 显示导出设置对话框
+        dialog = ExportSettingsDialog(len(all_images), self)
+        dialog.export_requested.connect(lambda config: self.start_batch_export(all_images, config))
+        dialog.exec_()
     
-    def show_export_settings(self):
-        """Show export settings dialog"""
-        self.ready_label.setText("导出设置将在下一版本实现")
+
+    
+    @log_exception
+    def start_batch_export(self, image_list, export_config=None):
+        """开始批量导出"""
+        if not image_list:
+            return
+            
+        # 如果没有提供导出配置，使用默认配置
+        if export_config is None:
+            export_config = {
+                'format': 'jpeg',
+                'quality': 95,
+                'keep_original_format': True,
+                'output_dir': os.path.join(os.path.expanduser("~"), "Desktop"),
+                'create_subfolder': True,
+                'overwrite_existing': False,
+                'naming_mode': 'suffix',
+                'prefix': '',
+                'suffix': '_watermarked',
+                'custom_pattern': ''
+            }
+        
+        logger.info(f"开始批量导出 {len(image_list)} 张图片")
+        
+        # 创建导出进度对话框
+        progress_dialog = ExportProgressDialog(len(image_list), self)
+        
+        # 创建批量导出引擎
+        self.export_engine = BatchExportEngine(
+            image_list, 
+            self.watermark_config, 
+            export_config, 
+            self
+        )
+        
+        # 连接信号
+        self.export_engine.progress_updated.connect(progress_dialog.update_progress)
+        self.export_engine.error_occurred.connect(progress_dialog.update_error)
+        self.export_engine.export_completed.connect(progress_dialog.export_completed)
+        self.export_engine.finished.connect(self.on_export_finished)
+        
+        # 连接取消信号
+        progress_dialog.cancel_requested.connect(self.export_engine.cancel_export)
+        
+        # 启动导出线程
+        self.export_engine.start()
+        
+        # 显示进度对话框
+        progress_dialog.exec_()
+    
+    @log_exception
+    def on_export_finished(self):
+        """导出完成处理"""
+        if hasattr(self, 'export_engine'):
+            self.export_engine.deleteLater()
+            delattr(self, 'export_engine')
+        
+        self.ready_label.setText("导出完成")
+        logger.info("批量导出线程已结束")
     
     def show_template_manager(self):
         """Show template manager dialog"""
@@ -632,6 +703,13 @@ class MainWindow(QMainWindow):
                     
                     # 记录水印处理开始
                     logger.info(f"开始为图片添加水印: {image_info.file_name}")
+                    # Debug: 打印字体配置信息
+                    logger.debug(f"导出配置 - 字体: {self.watermark_config.text_config.font_family}, "
+                               f"大小: {self.watermark_config.text_config.font_size}, "
+                               f"粗体: {self.watermark_config.text_config.font_bold}, "
+                               f"斜体: {self.watermark_config.text_config.font_italic}, "
+                               f"阴影: {self.watermark_config.text_config.has_shadow}, "
+                               f"描边: {self.watermark_config.text_config.has_outline}")
                     progress_dialog.add_log(f"正在处理: {image_info.file_name}...")
                     
                     # Process image with watermark

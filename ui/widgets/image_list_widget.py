@@ -473,6 +473,10 @@ class ImageListWidget(QWidget):
         """Remove selected items"""
         self.model.remove_selected()
     
+    def get_selected_images(self):
+        """Get all selected images"""
+        return self.model.get_selected_images()
+    
     def confirm_clear(self):
         """Confirm and clear all images"""
         if self.model.count() > 0:

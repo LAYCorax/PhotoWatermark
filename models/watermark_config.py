@@ -3,9 +3,28 @@ Watermark Configuration Model
 Defines the structure for watermark settings
 """
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from enum import Enum
 from utils.logger import logger, log_exception
+
+
+# Available font families for Chinese and English support
+AVAILABLE_FONTS = [
+    "Microsoft YaHei UI",
+    "Microsoft YaHei", 
+    "SimHei",
+    "黑体",
+    "宋体",
+    "Arial",
+    "Times New Roman",
+    "Calibri",
+    "Verdana",
+    "Georgia",
+    "Comic Sans MS",
+    "Courier New",
+    "Impact",
+    "Trebuchet MS"
+]
 
 
 class WatermarkType(Enum):
@@ -28,24 +47,32 @@ class WatermarkPosition(Enum):
     CUSTOM = "custom"
 
 
+
+
+
 @dataclass
 class TextWatermarkConfig:
-    """Configuration for text watermarks"""
+    """Configuration for text watermarks with advanced effects"""
+    # Basic text properties
     text: str = "Watermark"
-    font_family: str = "Arial"
+    font_family: str = "Arial"  # 默认字体改为Arial
     font_size: int = 32
     font_bold: bool = False
     font_italic: bool = False
     color: Tuple[int, int, int] = (255, 255, 255)  # RGB
     opacity: float = 0.8  # 0.0 to 1.0
     
-    # Advanced text effects
+    # Shadow effect
     has_shadow: bool = False
-    shadow_offset: Tuple[int, int] = (2, 2)
+    shadow_offset: Tuple[int, int] = (3, 3)
     shadow_color: Tuple[int, int, int] = (0, 0, 0)
+    shadow_opacity: float = 0.6
+    
+    # Outline effect
     has_outline: bool = False
-    outline_width: int = 1
+    outline_width: int = 2
     outline_color: Tuple[int, int, int] = (0, 0, 0)
+    outline_opacity: float = 1.0
 
 
 @dataclass

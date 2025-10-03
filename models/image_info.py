@@ -182,6 +182,10 @@ class ImageListModel(QObject):
         """Get all images"""
         return self._images.copy()
     
+    def get_all_images(self) -> list:
+        """Get all images (alias for get_images)"""
+        return self.get_images()
+    
     def get_selected_images(self) -> list:
         """Get all selected images"""
         return [img for img in self._images if img.is_selected]

@@ -4,8 +4,6 @@
 
 PhotoWatermark 是一个基于 Python 和 PyQt5/PySide6 的 Windows 桌面端照片水印应用程序，提供直观的图形界面用于批量添加文本和图片水印到照片上。
 
-**设计参考**：本项目采用 MaaAssistantArknights 项目的 GUI 设计风格，确保界面的专业性和用户友好性。
-
 ## 技术栈
 
 - **UI框架**: PyQt5/PySide6
@@ -70,7 +68,6 @@ PhotoWatermark/
 
 #### 核心功能
 1. **主窗口框架**
-   - 基于 MaaAssistantArknights 风格的主窗口布局
    - 左侧图片列表区域
    - 中央预览区域  
    - 右侧配置面板
@@ -140,8 +137,7 @@ PhotoWatermark/
 
 3. **精确定位**
    - 鼠标拖拽定位
-   - 坐标数值输入
-   - 水印旋转功能
+   - 滑块控制水印中心旋转功能
 
 #### 技术实现
 - 高级字体渲染
@@ -176,7 +172,7 @@ PhotoWatermark/
 - 本地化框架
 - 用户设置持久化
 
-## UI设计规范 (参考 MaaAssistantArknights)
+## UI设计规范
 
 ### 布局设计
 1. **主窗口布局**
