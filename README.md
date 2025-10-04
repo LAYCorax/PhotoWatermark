@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-PhotoWatermark 是一个专业的照片水印桌面应用程序，采用 MaaAssistantArknights 项目的设计风格，提供直观易用的图形界面用于批量添加文本和图片水印。
+PhotoWatermark 是一个专业的照片水印桌面应用程序，提供直观易用的图形界面用于批量添加文本和图片水印。
 
 ## 项目结构
 
@@ -42,7 +42,6 @@ PhotoWatermark/
 
 #### 1. 基础框架
 - ✅ 基于 PyQt5 的现代化 GUI 框架
-- ✅ MaaAssistantArknights 设计风格的界面
 - ✅ 响应式三栏布局 (图片列表 + 预览 + 配置面板)
 - ✅ 完整的菜单系统和状态栏
 - ✅ 高DPI显示支持

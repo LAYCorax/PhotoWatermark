@@ -1,6 +1,5 @@
 """
 Main Window for PhotoWatermark Application
-Based on MaaAssistantArknights GUI design principles
 """
 import sys
 import os
@@ -566,7 +565,6 @@ class MainWindow(QMainWindow):
             "PhotoWatermark v1.0.0\n\n"
             "专业的照片水印桌面应用程序\n"
             "支持文本和图片水印，批量处理功能\n\n"
-            "基于 MaaAssistantArknights 设计风格\n"
             "使用 PyQt5 和 Pillow 开发"
         )
     

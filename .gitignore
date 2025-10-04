@@ -235,7 +235,7 @@ tests/*.tiff
 
 # Build artifacts specific to PhotoWatermark
 photo_watermark.spec
-*.spec
+PhotoWatermark.spec
 
 # Development and diagnostic scripts
 scripts/test_*.py
