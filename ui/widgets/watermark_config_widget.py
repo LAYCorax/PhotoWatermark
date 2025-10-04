@@ -10,7 +10,7 @@ try:
         QLineEdit, QComboBox, QSlider, QSpinBox, QCheckBox,
         QGroupBox, QColorDialog, QFileDialog, QTabWidget,
         QFrame, QSizePolicy, QButtonGroup, QRadioButton,
-        QGridLayout
+        QGridLayout, QMessageBox
     )
     from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
     from PyQt5.QtGui import QFont, QColor, QPalette, QFontDatabase
@@ -19,6 +19,7 @@ except ImportError:
     raise
 
 from utils.logger import logger, log_exception
+from utils.font_manager import FontManager
 from models.watermark_config import (
     WatermarkConfig, WatermarkType, WatermarkPosition,
     TextWatermarkConfig, ImageWatermarkConfig
@@ -389,6 +390,36 @@ class TextWatermarkWidget(QWidget):
     @pyqtSlot(str)
     def on_font_changed(self, font: str):
         """Handle font change"""
+        # 检查新字体是否支持当前的样式设置
+        unsupported_styles = []
+        
+        # 检查粗体
+        if self.config.font_bold and not FontManager.check_font_style_support(font, bold=True, italic=False):
+            unsupported_styles.append("粗体")
+        
+        # 检查斜体
+        if self.config.font_italic and not FontManager.check_font_style_support(font, bold=False, italic=True):
+            unsupported_styles.append("斜体")
+        
+        # 检查粗体+斜体组合
+        if self.config.font_bold and self.config.font_italic:
+            if not FontManager.check_font_style_support(font, bold=True, italic=True):
+                if "粗体" not in unsupported_styles and "斜体" not in unsupported_styles:
+                    unsupported_styles.append("粗斜体")
+        
+        # 如果有不支持的样式，显示警告
+        if unsupported_styles:
+            styles_text = "、".join(unsupported_styles)
+            QMessageBox.warning(
+                self,
+                "字体样式提示",
+                f"字体 '{font}' 不支持以下样式：{styles_text}。\n\n"
+                f"系统将使用替代字体（如Arial）来显示对应效果，"
+                f"这可能导致水印字体与您选择的字体不同。\n\n"
+                f"建议：选择支持这些样式的字体（如Arial、Times New Roman等），"
+                f"或取消相应的样式选项。"
+            )
+        
         self.config.font_family = font
         self.config_changed.emit()
     
@@ -413,12 +444,36 @@ class TextWatermarkWidget(QWidget):
     @pyqtSlot(bool)
     def on_bold_changed(self, bold: bool):
         """Handle bold change"""
+        # 检查字体是否支持粗体
+        if bold and not FontManager.check_font_style_support(self.config.font_family, bold=True, italic=False):
+            # 字体不支持粗体，显示警告
+            QMessageBox.warning(
+                self,
+                "字体样式提示",
+                f"字体 '{self.config.font_family}' 不支持粗体样式。\n\n"
+                f"系统将使用替代字体（如Arial）来显示粗体效果，"
+                f"这可能导致水印字体与您选择的字体不同。\n\n"
+                f"建议：选择支持粗体的字体（如Arial、Times New Roman等）"
+            )
+        
         self.config.font_bold = bold
         self.config_changed.emit()
     
     @pyqtSlot(bool)
     def on_italic_changed(self, italic: bool):
         """Handle italic change"""
+        # 检查字体是否支持斜体
+        if italic and not FontManager.check_font_style_support(self.config.font_family, bold=False, italic=True):
+            # 字体不支持斜体，显示警告
+            QMessageBox.warning(
+                self,
+                "字体样式提示",
+                f"字体 '{self.config.font_family}' 不支持斜体样式。\n\n"
+                f"系统将使用替代字体（如Arial）来显示斜体效果，"
+                f"这可能导致水印字体与您选择的字体不同。\n\n"
+                f"建议：选择支持斜体的字体（如Arial、Times New Roman等）"
+            )
+        
         self.config.font_italic = italic
         self.config_changed.emit()
     
@@ -994,3 +1049,28 @@ class WatermarkConfigWidget(QWidget):
     def update_config(self):
         """Update UI when config is changed externally"""
         self.update_ui_from_config()
+    
+    def load_config(self, new_config: WatermarkConfig):
+        """加载新的配置并更新UI"""
+        self.config = new_config
+        
+        # 更新各个子控件的配置引用
+        self.position_widget.config = new_config
+        
+        if hasattr(self, 'text_widget') and self.text_widget:
+            self.text_widget.config = new_config.text_config
+            # 调用文本控件的UI更新方法
+            self.text_widget.update_ui_from_config()
+        
+        if hasattr(self, 'image_widget') and self.image_widget:
+            self.image_widget.config = new_config.image_config
+            # 调用图片控件的UI更新方法
+            self.image_widget.update_ui_from_config()
+        
+        # 调用位置控件的UI更新方法
+        self.position_widget.update_ui_from_config()
+        
+        # 更新主控件的UI显示（更新单选按钮和标签页）
+        self.update_ui_from_config()
+        
+        logger.debug("配置已加载到WatermarkConfigWidget，所有UI已同步更新")

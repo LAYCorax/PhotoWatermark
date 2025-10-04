@@ -27,13 +27,14 @@ class ExportSettingsDialog(QDialog):
     # 信号
     export_requested = pyqtSignal(dict)  # 导出配置信号
     
-    def __init__(self, total_images: int, parent=None):
+    def __init__(self, total_images: int, image_list=None, parent=None):
         super().__init__(parent)
         self.total_images = total_images
+        self.image_list = image_list or []  # 保存图片列表用于检查源目录
         self.export_config = {}
         
         self.setWindowTitle("导出设置")
-        self.setFixedSize(800, 780)
+        self.setFixedSize(800, 1000)
         self.setModal(True)
         
         logger.debug(f"创建导出设置对话框，总计 {total_images} 张图片")
@@ -106,7 +107,7 @@ class ExportSettingsDialog(QDialog):
         
         # 预览信息
         self.preview_info = QTextEdit()
-        self.preview_info.setFixedHeight(460)
+        self.preview_info.setFixedHeight(650)
         self.preview_info.setStyleSheet("""
             QTextEdit {
                 font-family: "Microsoft YaHei UI", "Consolas", monospace;
@@ -229,6 +230,124 @@ class ExportSettingsDialog(QDialog):
             }
         """)
         layout.addWidget(self.keep_original_format)
+        
+        # 添加分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+        
+        # 图片尺寸缩放设置
+        resize_title = QLabel("图片尺寸缩放")
+        resize_title.setStyleSheet("""
+            QLabel {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 13px;
+                font-weight: bold;
+                color: #2c3e50;
+                padding: 5px 0px;
+            }
+        """)
+        layout.addWidget(resize_title)
+        
+        # 启用缩放选项
+        self.enable_resize = QCheckBox("调整图片尺寸")
+        self.enable_resize.setStyleSheet("""
+            QCheckBox {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 12px;
+                color: #2c3e50;
+                padding: 0px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+        """)
+        layout.addWidget(self.enable_resize)
+        
+        # 缩放模式选择
+        resize_mode_layout = QHBoxLayout()
+        resize_mode_label = QLabel("缩放模式:")
+        resize_mode_label.setStyleSheet("""
+            QLabel {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 12px;
+                color: #2c3e50;
+            }
+        """)
+        self.resize_mode_combo = QComboBox()
+        self.resize_mode_combo.addItems(["按百分比缩放", "指定最长边", "指定宽度", "指定高度"])
+        self.resize_mode_combo.setStyleSheet("""
+            QComboBox {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 12px;
+                color: #2c3e50;
+                background-color: white;
+                border: 1px solid #bdc3c7;
+                border-radius: 3px;
+                padding: 3px 5px;
+            }
+            QComboBox:hover {
+                border-color: #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                color: #2c3e50;
+                background-color: white;
+                selection-background-color: #3498db;
+                selection-color: white;
+            }
+            QComboBox QAbstractItemView::item {
+                color: #2c3e50;
+                padding: 3px 5px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                color: #2c3e50;
+                background-color: #e8f4f8;
+            }
+        """)
+        self.resize_mode_combo.setEnabled(False)                     
+        resize_mode_layout.addWidget(resize_mode_label)
+        resize_mode_layout.addWidget(self.resize_mode_combo)
+        layout.addLayout(resize_mode_layout)
+        
+        # 缩放值设置
+        resize_value_layout = QHBoxLayout()
+        self.resize_value_label = QLabel("缩放比例:")
+        self.resize_value_label.setStyleSheet("""
+            QLabel {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 12px;
+                color: #2c3e50;
+            }
+        """)
+        self.resize_value_spinbox = QSpinBox()
+        self.resize_value_spinbox.setRange(10, 200)
+        self.resize_value_spinbox.setValue(100)
+        self.resize_value_spinbox.setSuffix("%")
+        self.resize_value_spinbox.setEnabled(False)
+        resize_value_layout.addWidget(self.resize_value_label)
+        resize_value_layout.addWidget(self.resize_value_spinbox)
+        resize_value_layout.addStretch()
+        layout.addLayout(resize_value_layout)
+        
+        # 提示信息
+        resize_hint = QLabel("💡 调整尺寸可减小文件大小，适合网络分享")
+        resize_hint.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #7f8c8d;
+                padding: 4px;
+                background-color: #ecf0f1;
+                border-radius: 3px;
+            }
+        """)
+        resize_hint.setWordWrap(True)
+        layout.addWidget(resize_hint)
         
         group.setLayout(layout)
         return group
@@ -518,9 +637,14 @@ class ExportSettingsDialog(QDialog):
         # 复选框信号
         self.create_subfolder.toggled.connect(lambda: self.update_preview())
         self.keep_original_format.toggled.connect(lambda: self.update_preview())
+        
+        # 缩放相关信号
+        self.enable_resize.toggled.connect(self.on_resize_enabled_changed)
+        self.resize_mode_combo.currentIndexChanged.connect(self.on_resize_mode_changed)
+        self.resize_value_spinbox.valueChanged.connect(lambda: self.update_preview())
     
     @log_exception
-    def browse_output_folder(self):
+    def browse_output_folder(self, checked=False):
         """浏览输出文件夹"""
         folder = QFileDialog.getExistingDirectory(
             self, 
@@ -559,6 +683,40 @@ class ExportSettingsDialog(QDialog):
         self.update_preview()
     
     @log_exception
+    def on_resize_enabled_changed(self, enabled):
+        """缩放启用状态变化处理"""
+        self.resize_mode_combo.setEnabled(enabled)
+        self.resize_value_spinbox.setEnabled(enabled)
+        self.update_preview()
+    
+    @log_exception
+    def on_resize_mode_changed(self, index):
+        """缩放模式变化处理"""
+        # 根据模式更新标签和范围
+        if index == 0:  # 按百分比
+            self.resize_value_label.setText("缩放比例:")
+            self.resize_value_spinbox.setRange(10, 200)
+            self.resize_value_spinbox.setValue(100)
+            self.resize_value_spinbox.setSuffix("%")
+        elif index == 1:  # 最长边
+            self.resize_value_label.setText("最长边:")
+            self.resize_value_spinbox.setRange(100, 8000)
+            self.resize_value_spinbox.setValue(1920)
+            self.resize_value_spinbox.setSuffix(" px")
+        elif index == 2:  # 宽度
+            self.resize_value_label.setText("宽度:")
+            self.resize_value_spinbox.setRange(100, 8000)
+            self.resize_value_spinbox.setValue(1920)
+            self.resize_value_spinbox.setSuffix(" px")
+        else:  # 高度
+            self.resize_value_label.setText("高度:")
+            self.resize_value_spinbox.setRange(100, 8000)
+            self.resize_value_spinbox.setValue(1080)
+            self.resize_value_spinbox.setSuffix(" px")
+        
+        self.update_preview()
+    
+    @log_exception
     def update_preview(self):
         """更新预览信息"""
         try:
@@ -592,6 +750,20 @@ class ExportSettingsDialog(QDialog):
         
         if config['keep_original_format']:
             lines.append("注意: 将保持原始格式，上述格式仅用于格式转换")
+        
+        lines.append("")
+        
+        # 尺寸设置
+        if config.get('enable_resize', False):
+            resize_mode = config.get('resize_mode', 0)
+            resize_value = config.get('resize_value', 100)
+            mode_names = ["按百分比", "最长边", "宽度", "高度"]
+            if resize_mode == 0:
+                lines.append(f"图片缩放: {mode_names[resize_mode]} - {resize_value}%")
+            else:
+                lines.append(f"图片缩放: {mode_names[resize_mode]} - {resize_value}px")
+        else:
+            lines.append("图片缩放: 保持原始尺寸")
         
         lines.append("")
         
@@ -665,6 +837,101 @@ class ExportSettingsDialog(QDialog):
         self.estimated_size_label.setText(f"{estimated_size:.1f} MB")
         self.estimated_time_label.setText(estimated_time_str)
     
+    def _check_may_overwrite_source(self, config):
+        """
+        检查是否可能覆盖源图片
+        返回：(会被覆盖的文件列表, 是否检测到覆盖风险)
+        """
+        if not self.image_list:
+            return [], False
+        
+        output_dir = os.path.normpath(config['output_dir'])
+        
+        # 如果启用了创建子文件夹，不会覆盖
+        if config.get('create_subfolder', False):
+            return [], False
+        
+        will_overwrite = []  # 存储会被覆盖的文件信息
+        
+        # 遍历所有图片，精确判断哪些会被覆盖
+        for index, image_info in enumerate(self.image_list):
+            if not hasattr(image_info, 'file_path'):
+                continue
+            
+            source_path = image_info.file_path
+            source_dir = os.path.normpath(os.path.dirname(source_path))
+            
+            # 只检查输出目录与源目录相同的文件
+            if source_dir != output_dir:
+                continue
+            
+            # 生成输出文件名（复制batch_export_engine的逻辑）
+            output_filename = self._generate_output_filename(source_path, index, config)
+            output_path = os.path.normpath(os.path.join(output_dir, output_filename))
+            source_path_norm = os.path.normpath(source_path)
+            
+            # 判断输出路径是否与源路径相同
+            # 在Windows上不区分大小写
+            if os.name == 'nt':  # Windows
+                paths_match = output_path.lower() == source_path_norm.lower()
+            else:  # Linux/Mac
+                paths_match = output_path == source_path_norm
+            
+            if paths_match:
+                will_overwrite.append({
+                    'source': os.path.basename(source_path),
+                    'output': output_filename
+                })
+                logger.warning(f"检测到会覆盖原图：{source_path} -> {output_path}")
+        
+        return will_overwrite, len(will_overwrite) > 0
+    
+    def _generate_output_filename(self, input_path, index, config):
+        """生成输出文件名（与batch_export_engine保持一致）"""
+        original_name = os.path.splitext(os.path.basename(input_path))[0]
+        original_ext = os.path.splitext(input_path)[1]  # 保持原始大小写
+        
+        # 确定输出扩展名
+        if config.get('keep_original_format', False):
+            output_ext = original_ext
+        else:
+            # 直接使用format，与batch_export_engine一致
+            output_ext = f".{config['format']}"
+        
+        # 根据命名模式生成新文件名
+        naming_mode = config['naming_mode']
+        
+        if naming_mode == 'original':
+            new_name = original_name
+        elif naming_mode == 'prefix':
+            prefix = config.get('prefix', 'watermarked_')
+            new_name = prefix + original_name
+        elif naming_mode == 'suffix':
+            suffix = config.get('suffix', '_watermarked')
+            new_name = original_name + suffix
+        elif naming_mode == 'custom':
+            pattern = config.get('custom_pattern', '{name}_watermarked')
+            new_name = self._apply_custom_pattern(pattern, original_name, index)
+        else:
+            new_name = original_name + '_watermarked'
+        
+        return new_name + output_ext
+    
+    def _apply_custom_pattern(self, pattern, original_name, index):
+        """应用自定义命名模式"""
+        from datetime import datetime
+        now = datetime.now()
+        
+        result = pattern.replace('{name}', original_name)
+        result = result.replace('{index}', str(index + 1).zfill(3))
+        result = result.replace('{date}', now.strftime('%Y%m%d'))
+        result = result.replace('{time}', now.strftime('%H%M%S'))
+        result = result.replace('{year}', now.strftime('%Y'))
+        result = result.replace('{month}', now.strftime('%m'))
+        result = result.replace('{day}', now.strftime('%d'))
+        
+        return result
+    
     def get_export_config(self):
         """获取导出配置"""
         # 确定输出格式
@@ -697,7 +964,10 @@ class ExportSettingsDialog(QDialog):
             'naming_mode': naming_mode,
             'prefix': self.prefix_input.text(),
             'suffix': self.suffix_input.text(),
-            'custom_pattern': self.custom_input.text()
+            'custom_pattern': self.custom_input.text(),
+            'enable_resize': self.enable_resize.isChecked(),
+            'resize_mode': self.resize_mode_combo.currentIndex(),
+            'resize_value': self.resize_value_spinbox.value()
         }
     
     @log_exception
@@ -713,6 +983,41 @@ class ExportSettingsDialog(QDialog):
         if not os.path.exists(config['output_dir']):
             QMessageBox.warning(self, "配置错误", "输出文件夹不存在")
             return
+        
+        # 检查是否可能覆盖原图
+        will_overwrite, has_overwrite = self._check_may_overwrite_source(config)
+        
+        if has_overwrite:
+            # 构建文件列表提示
+            file_list = "\n".join([f"  • {item['source']}" for item in will_overwrite[:10]])
+            if len(will_overwrite) > 10:
+                file_list += f"\n  ... 还有 {len(will_overwrite) - 10} 个文件"
+            
+            warning_message = (
+                f"检测到以下 {len(will_overwrite)} 个文件将被覆盖：\n\n"
+                f"{file_list}\n\n"
+                "这些文件的输出路径与源文件路径完全相同！\n\n"
+                "建议采取以下措施之一：\n"
+                "1. 选择其他输出目录\n"
+                "2. 启用'创建子文件夹'选项\n"
+                "3. 使用'添加前缀'或'添加后缀'命名模式\n"
+                "4. 取消'覆盖已存在文件'选项\n\n"
+                "是否仍要继续导出？"
+            )
+            
+            reply = QMessageBox.warning(
+                self,
+                "警告：将覆盖原始文件",
+                warning_message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.No:
+                logger.info(f"用户取消导出（避免覆盖 {len(will_overwrite)} 个原图）")
+                return
+            else:
+                logger.warning(f"用户确认导出（将覆盖 {len(will_overwrite)} 个原图）")
         
         # 发送导出请求信号
         self.export_config = config

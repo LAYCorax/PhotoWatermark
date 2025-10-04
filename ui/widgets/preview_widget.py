@@ -135,13 +135,31 @@ class PreviewGraphicsView(QGraphicsView):
                     # 如果使用了性能优化，需要调整图片项在场景中的显示
                     scale_factor = 1.0 / self.preview_scale_ratio
                     self.image_item.setScale(scale_factor)
-                    logger.debug(f"预览: 设置图片项缩放 {scale_factor:.3f}")
+                    logger.info(f"预览: 设置图片项缩放 {scale_factor:.3f}")
+                    logger.info(f"预览: 图片项边界 {self.image_item.boundingRect()}")
+                else:
+                    logger.info("预览: 无需缩放图片项，preview_scale_ratio = 1.0")
                 
-                self.fit_in_view()
+                # 记录视图和场景信息
+                logger.info(f"预览: 场景矩形 {self.scene.sceneRect()}")
+                logger.info(f"预览: 视图尺寸 {self.viewport().width()}x{self.viewport().height()}")
+                
+                # 调用fit_in_view前的状态
+                logger.info("预览: 调用fit_in_view()前的变换矩阵:")
+                transform = self.transform()
+                logger.info(f"预览: m11={transform.m11():.3f}, m22={transform.m22():.3f}")
+                
+                # 关键修复：使用场景矩形来适应，而不是图片项
+                # 因为场景矩形是原图尺寸，而图片项被缩放后也应该占据整个场景
+                self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+                self.zoom_factor = 1.0
+                
+                # 调用fit_in_view后的状态
+                logger.info("预览: 调用fitInView(sceneRect)后的变换矩阵:")
+                transform = self.transform()
+                logger.info(f"预览: m11={transform.m11():.6f}, m22={transform.m22():.6f}")
+                logger.info(f"预览: zoom_factor={self.zoom_factor}")
                 logger.info("预览: 性能优化预览加载完成，自动适应窗口")
-                
-                # 自动适应窗口大小（默认点击“适应”）
-                self.reset_zoom()
                 
             else:
                 logger.error("QPixmap创建失败")
@@ -178,8 +196,16 @@ class PreviewGraphicsView(QGraphicsView):
     def fit_in_view(self):
         """Fit image in view"""
         if self.image_item:
+            logger.info(f"fit_in_view: 图片项边界 {self.image_item.boundingRect()}")
+            logger.info(f"fit_in_view: 场景矩形 {self.scene.sceneRect()}")
+            logger.info(f"fit_in_view: 视口尺寸 {self.viewport().width()}x{self.viewport().height()}")
+            
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.zoom_factor = 1.0
+            
+            logger.info("fit_in_view: fitInView()调用完成")
+            transform = self.transform()
+            logger.info(f"fit_in_view: 变换后 m11={transform.m11():.6f}, m22={transform.m22():.6f}")
     
     def zoom_in(self):
         """Zoom in"""
@@ -382,10 +408,32 @@ class PreviewGraphicsView(QGraphicsView):
             # Generate watermarked image
             watermarked_pixmap = self.generate_watermarked_preview(image_path, config)
             if watermarked_pixmap:
+                logger.info(f"预览: 更新水印覆盖层 - 水印图{watermarked_pixmap.width()}x{watermarked_pixmap.height()}")
+                
                 self.scene.clear()
                 self.image_item = self.scene.addPixmap(watermarked_pixmap)
-                self.scene.setSceneRect(QRectF(watermarked_pixmap.rect()))
+                
+                # 关键：保持场景矩形为原图尺寸（与set_image一致）
+                if self.original_image_size:
+                    original_rect = QRectF(0, 0, self.original_image_size[0], self.original_image_size[1])
+                    self.scene.setSceneRect(original_rect)
+                    logger.info(f"预览: 水印覆盖层场景矩形保持原图尺寸 {self.original_image_size[0]}x{self.original_image_size[1]}")
+                    
+                    # 如果使用了性能优化，需要缩放图片项
+                    if self.preview_scale_ratio != 1.0:
+                        scale_factor = 1.0 / self.preview_scale_ratio
+                        self.image_item.setScale(scale_factor)
+                        logger.info(f"预览: 水印覆盖层设置图片项缩放 {scale_factor:.3f}")
+                    
+                    # 使用场景矩形适应视图（与set_image一致）
+                    self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+                    logger.info("预览: 水印覆盖层自动适应窗口完成")
+                else:
+                    # Fallback: 使用水印图尺寸
+                    self.scene.setSceneRect(QRectF(watermarked_pixmap.rect()))
+                    self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         except Exception as e:
+            logger.error(f"更新水印覆盖层失败: {e}")
             print(f"Error updating watermark overlay: {e}")
     
     @log_exception
@@ -1052,13 +1100,26 @@ class PreviewGraphicsView(QGraphicsView):
             except Exception as e:
                 logger.warning(f"FontManager找到字体文件但加载失败 {font_path}: {e}")
         
-        # 如果没有样式需求，再次尝试查找基础字体
+        # 如果FontManager返回None（说明该字体不支持该样式），使用Arial作为替代字体
+        # 这与AdvancedTextRenderer的行为保持一致
         if (bold or italic) and font_path is None:
+            logger.info(f"预览: {font_family} 不支持当前样式(粗体:{bold}, 斜体:{italic})，使用Arial替代")
+            # 尝试使用对应样式的Arial字体
+            arial_font_path = FontManager.get_font_path("Arial", bold, italic)
+            if arial_font_path:
+                try:
+                    font = ImageFont.truetype(arial_font_path, font_size)
+                    logger.info(f"预览: 成功使用Arial替代字体: {arial_font_path}")
+                    return font
+                except Exception as e:
+                    logger.warning(f"Arial替代字体加载失败 {arial_font_path}: {e}")
+            
+            # 如果Arial也失败，尝试使用基础字体（最后的fallback）
             font_path = FontManager.get_font_path(font_family, False, False)
             if font_path:
                 try:
                     font = ImageFont.truetype(font_path, font_size)
-                    logger.debug(f"使用基础字体替代样式字体: {font_family} -> {font_path}")
+                    logger.warning(f"预览: Arial替代失败，使用基础字体: {font_family} -> {font_path}")
                     return font
                 except Exception as e:
                     logger.warning(f"基础字体加载失败 {font_path}: {e}")

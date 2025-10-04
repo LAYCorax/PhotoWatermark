@@ -12,6 +12,7 @@ import math
 from typing import Tuple, Optional, List
 from models.watermark_config import TextWatermarkConfig
 from utils.logger import logger, log_exception
+from utils.font_manager import FontManager
 
 
 class AdvancedTextRenderer:
@@ -78,36 +79,58 @@ class AdvancedTextRenderer:
             # Paste text layer using alpha channel as mask for exact positioning
             result.paste(text_layer, (0, 0), text_layer)
             
-            # Convert back to original mode if needed, using higher quality conversion
-            if image.mode != 'RGBA':
-                if image.mode == 'RGB':
-                    # For RGB conversion, ensure better quality preservation
-                    return result.convert('RGB', dither=Image.NONE)
-                else:
-                    return result.convert(image.mode)
+            # Keep RGBA mode to preserve transparency (don't convert back)
+            # This ensures PNG files maintain their alpha channel
             return result
         else:
             return Image.blend(image, text_layer, alpha=config.opacity)
     
     def _load_font_with_style(self, font_family: str, font_size: int, bold: bool = False, italic: bool = False) -> ImageFont.FreeTypeFont:
-        """Load font with proper bold and italic support"""
+        """Load font with proper bold and italic support - uses FontManager for consistency"""
         cache_key = f"{font_family}_{font_size}_{bold}_{italic}"
         
         if cache_key in self.font_cache:
             return self.font_cache[cache_key]
         
+        logger.debug(f"高级渲染器: 加载字体 {font_family}, 大小:{font_size}, 粗体:{bold}, 斜体:{italic}")
+        
+        # First try using FontManager (same as preview and export engine)
+        font_path = FontManager.get_font_path(font_family, bold, italic)
+        if font_path:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+                logger.info(f"高级渲染器: 成功使用FontManager加载字体: {font_family} -> {font_path}")
+                self.font_cache[cache_key] = font
+                return font
+            except Exception as e:
+                logger.warning(f"高级渲染器: FontManager找到字体文件但加载失败 {font_path}: {e}")
+        
+        # If FontManager returns None (font doesn't support this style),
+        # skip base font fallback and go directly to font substitution logic
+        # This ensures we use Arial for unsupported styles (like YaHei italic)
+        # rather than falling back to base font without styles
+        
+        # Fallback: Try hardcoded paths with font substitution logic
         font_paths = []
         
-        # Build font paths based on style requirements
-        if font_family == "Microsoft YaHei UI" or font_family == "Microsoft YaHei":
+        # Build font paths based on style requirements WITH FONT SUBSTITUTION
+        if font_family in ["Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑"]:
             if bold and italic:
-                # For bold+italic combination, try Arial bold italic first, then YaHei bold
-                font_paths.extend(["C:/Windows/Fonts/arialbi.ttf", "arialbi.ttf", "C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"])
+                # YaHei doesn't have bold+italic, use Arial bold italic as substitute
+                font_paths.extend([
+                    "C:/Windows/Fonts/arialbi.ttf", "arialbi.ttf",
+                    "C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"
+                ])
+                logger.info(f"高级渲染器: 微软雅黑无粗斜体，尝试使用Arial粗斜体替代")
             elif bold:
                 font_paths.extend(["C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"])
             elif italic:
-                # YaHei doesn't have separate italic, use Arial italic as fallback
-                font_paths.extend(["C:/Windows/Fonts/ariali.ttf", "C:/Windows/Fonts/msyh.ttc", "msyh.ttc", "ariali.ttf"])
+                # CRITICAL: YaHei doesn't have separate italic, use Arial italic as fallback
+                font_paths.extend([
+                    "C:/Windows/Fonts/ariali.ttf", "ariali.ttf",  # Primary: Arial italic
+                    "C:/Windows/Fonts/msyh.ttc", "msyh.ttc"       # Fallback: Base YaHei
+                ])
+                logger.info(f"高级渲染器: 微软雅黑无斜体，尝试使用Arial斜体替代")
             else:
                 font_paths.extend(["C:/Windows/Fonts/msyh.ttc", "msyh.ttc"])
         elif font_family == "Arial":
@@ -128,6 +151,41 @@ class AdvancedTextRenderer:
                 font_paths.extend(["C:/Windows/Fonts/timesi.ttf", "timesi.ttf"])
             else:
                 font_paths.extend(["C:/Windows/Fonts/times.ttf", "times.ttf"])
+        else:
+            # For other fonts, try common patterns
+            extensions = [".ttf", ".ttc", ".otf"]
+            style_suffixes = []
+            
+            if bold and italic:
+                style_suffixes = ["bi", "bd", "bold-italic", "bolditalic"]
+            elif bold:
+                style_suffixes = ["bd", "bold", "b"]
+            elif italic:
+                style_suffixes = ["i", "italic", "o"]
+            
+            # Font name mapping
+            font_name_mapping = {
+                "微软雅黑": "msyh",
+                "宋体": "simsun",
+                "黑体": "simhei",
+                "楷体": "simkai",
+                "仿宋": "simfang",
+            }
+            
+            font_base = font_name_mapping.get(font_family, font_family.lower().replace(" ", ""))
+            
+            # Build paths
+            for suffix in style_suffixes:
+                for ext in extensions:
+                    font_paths.append(f"C:/Windows/Fonts/{font_base}{suffix}{ext}")
+                    font_paths.append(f"C:/Windows/Fonts/{font_base}_{suffix}{ext}")
+            
+            # If italic requested for Chinese font, add Arial italic as fallback
+            if italic and font_family in ["宋体", "黑体", "楷体", "仿宋", "SimSun", "SimHei", "KaiTi", "FangSong"]:
+                font_paths.extend([
+                    "C:/Windows/Fonts/ariali.ttf", "ariali.ttf"
+                ])
+                logger.info(f"高级渲染器: {font_family}无斜体，尝试使用Arial斜体替代")
         
         # Fallback fonts
         font_paths.extend([
@@ -142,19 +200,23 @@ class AdvancedTextRenderer:
         ])
         
         font = None
+        loaded_font_path = None
         for font_path in font_paths:
             try:
                 font = ImageFont.truetype(font_path, font_size)
-                logger.debug(f"成功加载字体: {font_path} (粗体:{bold}, 斜体:{italic})")
+                loaded_font_path = font_path
+                logger.debug(f"高级渲染器: 成功加载字体: {font_path} (粗体:{bold}, 斜体:{italic})")
                 break
             except (OSError, IOError):
                 continue
         
         if font is None:
-            logger.warning(f"无法加载字体 {font_family}，使用默认字体")
+            logger.warning(f"高级渲染器: 无法加载字体 {font_family}，使用默认字体")
             font = ImageFont.load_default()
         else:
-            logger.debug(f"成功加载样式字体: {font_family} (粗体:{bold}, 斜体:{italic})")
+            # Log if we used a substitute font
+            if loaded_font_path and "arial" in loaded_font_path.lower() and font_family not in ["Arial"]:
+                logger.info(f"高级渲染器: 使用Arial字体替代 {font_family} 的样式变体")
         
         self.font_cache[cache_key] = font
         return font
@@ -179,14 +241,18 @@ class AdvancedTextRenderer:
                           font: ImageFont.FreeTypeFont, config: TextWatermarkConfig,
                           position: Tuple[int, int]) -> Image.Image:
         """创建带有效果的文本层"""
+        logger.debug(f"高级渲染器: 创建文本层 - 阴影:{config.has_shadow}, 描边:{config.has_outline}")
+        
         # Create transparent layer for text rendering
         text_layer = Image.new('RGBA', image_size, (0, 0, 0, 0))
         
         # Apply effects in the correct order
         if config.has_shadow:
+            logger.debug(f"高级渲染器: 应用阴影效果")
             text_layer = self._apply_shadow_effect(text_layer, text, font, position, config)
         
         if config.has_outline:
+            logger.debug(f"高级渲染器: 应用描边效果")
             text_layer = self._apply_outline_effect(text_layer, text, font, position, config)
         
         # Render main text on top at exact position
@@ -220,11 +286,13 @@ class AdvancedTextRenderer:
                             font: ImageFont.FreeTypeFont, position: Tuple[int, int],
                             config: TextWatermarkConfig) -> Image.Image:
         """应用描边效果"""
+        logger.debug(f"高级渲染器: 开始应用描边效果 - 宽度:{config.outline_width}, 颜色:{config.outline_color}, 不透明度:{config.outline_opacity}")
         draw = ImageDraw.Draw(text_layer)
         outline_color = (*config.outline_color, int(255 * config.outline_opacity))
         
         # Draw outline by rendering text multiple times with slight offsets around exact position
         width = config.outline_width
+        offset_count = 0
         for dx in range(-width, width + 1):
             for dy in range(-width, width + 1):
                 if dx == 0 and dy == 0:
@@ -233,7 +301,9 @@ class AdvancedTextRenderer:
                 outline_x = position[0] + dx
                 outline_y = position[1] + dy
                 draw.text((outline_x, outline_y), text, font=font, fill=outline_color)
+                offset_count += 1
         
+        logger.debug(f"高级渲染器: 描边效果已应用 - 绘制了{offset_count}个偏移副本")
         return text_layer
     
     def _apply_glow_effect(self, text_layer: Image.Image, text: str,

@@ -1,0 +1,35 @@
+{
+  "name": "带描边文字水印",
+  "config": {
+    "watermark_type": "text",
+    "text_config": {
+      "text": "SAMPLE",
+      "font_family": "Arial",
+      "font_size": 120,
+      "font_bold": true,
+      "font_italic": false,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "opacity": 0.6,
+      "has_shadow": false,
+      "has_outline": true,
+      "outline_color": [
+        0,
+        0,
+        0
+      ],
+      "outline_width": 3,
+      "outline_opacity": 0.8
+    },
+    "position": "center",
+    "margin_x": 0,
+    "margin_y": 0,
+    "rotation": -45.0
+  },
+  "description": "居中大号文字，带黑色描边效果",
+  "created_at": "2025-10-04 15:37:37",
+  "is_default": true
+}

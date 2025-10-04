@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from models.watermark_config import WatermarkConfig
+from core.advanced_text_renderer import AdvancedTextRenderer
 from utils.logger import logger, log_exception
 from utils.file_utils import FileUtils
 from utils.font_manager import FontManager
@@ -37,6 +38,9 @@ class BatchExportEngine(QThread):
         
         self.is_cancelled = False
         self.mutex = QMutex()
+        
+        # 初始化高级文本渲染器用于高级效果
+        self.advanced_text_renderer = AdvancedTextRenderer()
         
         # 统计信息
         self.stats = {
@@ -145,23 +149,34 @@ class BatchExportEngine(QThread):
             try:
                 # 打开原始图片
                 with Image.open(input_path) as original_image:
-                    # 转换为RGB模式（确保兼容性）
-                    if original_image.mode in ('RGBA', 'LA', 'P'):
-                        # 如果原图有透明通道，需要特殊处理
-                        if self.export_config['format'] == 'jpeg':
-                            # JPEG不支持透明，创建白色背景
+                    # 根据导出格式决定图片模式处理
+                    if self.export_config['format'] == 'jpeg':
+                        # JPEG不支持透明，统一转换为RGB
+                        if original_image.mode in ('RGBA', 'LA', 'P'):
+                            # 创建白色背景
                             rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
                             if original_image.mode == 'P':
                                 original_image = original_image.convert('RGBA')
                             rgb_image.paste(original_image, mask=original_image.split()[-1] if original_image.mode in ('RGBA', 'LA') else None)
                             processed_image = rgb_image
+                        elif original_image.mode == 'L':
+                            # 灰度图转RGB
+                            processed_image = original_image.convert('RGB')
                         else:
-                            processed_image = original_image.convert('RGBA')
+                            processed_image = original_image.copy()
                     else:
-                        processed_image = original_image.copy()
+                        # PNG、TIFF等格式，统一转换为RGBA以支持透明通道
+                        if original_image.mode != 'RGBA':
+                            processed_image = original_image.convert('RGBA')
+                        else:
+                            processed_image = original_image.copy()
                     
-                    # 应用水印
+                    # 先应用水印
                     watermarked_image = self.apply_watermark(processed_image, image_info)
+                    
+                    # 再应用图片尺寸缩放（如果启用），这样水印也会一起缩放
+                    if self.export_config.get('enable_resize', False):
+                        watermarked_image = self._resize_image(watermarked_image)
                     
                     # 保存图片
                     self.save_image(watermarked_image, output_path)
@@ -230,11 +245,63 @@ class BatchExportEngine(QThread):
         
         return result
     
+    def _resize_image(self, image: Image.Image) -> Image.Image:
+        """根据配置缩放图片"""
+        try:
+            resize_mode = self.export_config.get('resize_mode', 0)
+            resize_value = self.export_config.get('resize_value', 100)
+            
+            original_width, original_height = image.size
+            
+            if resize_mode == 0:  # 按百分比缩放
+                scale = resize_value / 100.0
+                new_width = int(original_width * scale)
+                new_height = int(original_height * scale)
+                logger.info(f"批量导出: 按百分比缩放 {resize_value}% - {original_width}x{original_height} -> {new_width}x{new_height}")
+                
+            elif resize_mode == 1:  # 指定最长边
+                max_side = resize_value
+                if original_width >= original_height:
+                    scale = max_side / original_width
+                else:
+                    scale = max_side / original_height
+                new_width = int(original_width * scale)
+                new_height = int(original_height * scale)
+                logger.info(f"批量导出: 按最长边缩放 {max_side}px - {original_width}x{original_height} -> {new_width}x{new_height}")
+                
+            elif resize_mode == 2:  # 指定宽度
+                new_width = resize_value
+                scale = new_width / original_width
+                new_height = int(original_height * scale)
+                logger.info(f"批量导出: 按宽度缩放 {resize_value}px - {original_width}x{original_height} -> {new_width}x{new_height}")
+                
+            else:  # 指定高度
+                new_height = resize_value
+                scale = new_height / original_height
+                new_width = int(original_width * scale)
+                logger.info(f"批量导出: 按高度缩放 {resize_value}px - {original_width}x{original_height} -> {new_width}x{new_height}")
+            
+            # 确保尺寸至少为1x1
+            new_width = max(1, new_width)
+            new_height = max(1, new_height)
+            
+            # 使用高质量的Lanczos重采样算法
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            return resized_image
+            
+        except Exception as e:
+            logger.error(f"缩放图片失败: {e}")
+            return image
+    
     @log_exception
     def apply_watermark(self, image, image_info):
         """应用水印到图片"""
         try:
-            # 这里重用现有的水印应用逻辑
+            # 确保图片是RGBA模式以支持透明通道
+            if image.mode != 'RGBA':
+                image = image.convert('RGBA')
+            
             # 创建画布
             draw = ImageDraw.Draw(image)
             
@@ -244,7 +311,7 @@ class BatchExportEngine(QThread):
             # 应用文本水印
             if (self.watermark_config.watermark_type.value == 'text' or 
                 self.watermark_config.watermark_type.value == 'both') and self.watermark_config.text_config.text:
-                self.apply_text_watermark(draw, image, img_width, img_height)
+                image = self.apply_text_watermark(draw, image, img_width, img_height)
             
             # 应用图片水印
             if (self.watermark_config.watermark_type.value == 'image' or 
@@ -261,76 +328,86 @@ class BatchExportEngine(QThread):
             return image
     
     def apply_text_watermark(self, draw, image, img_width, img_height):
-        """应用文本水印（支持旋转和自定义位置）"""
+        """应用文本水印（支持旋转和自定义位置，使用AdvancedTextRenderer支持高级效果）"""
         try:
             text = self.watermark_config.text_config.text
+            text_config = self.watermark_config.text_config
             
-            # 计算字体大小 - 使用配置中的实际字体大小，与预览保持一致
-            font_size = max(12, self.watermark_config.text_config.font_size)
+            # 计算字体大小
+            font_size = max(12, text_config.font_size)
             
             # 获取字体样式配置
-            font_family = self.watermark_config.text_config.font_family
-            font_bold = self.watermark_config.text_config.font_bold
-            font_italic = self.watermark_config.text_config.font_italic
+            font_family = text_config.font_family
+            font_bold = text_config.font_bold
+            font_italic = text_config.font_italic
             
             logger.info(f"批量导出: 应用文本水印 - 图片尺寸({img_width}x{img_height}), 文本:'{text}', 字体:{font_family}, 大小:{font_size}, 粗体:{font_bold}, 斜体:{font_italic}")
+            logger.info(f"批量导出: 效果设置 - 阴影:{text_config.has_shadow}, 描边:{text_config.has_outline}")
             logger.info(f"批量导出: 位置设置: {self.watermark_config.position}, custom_x={self.watermark_config.custom_x}, custom_y={self.watermark_config.custom_y}")
             
-            # 加载字体，支持粗体和斜体
-            font = self._load_styled_font(font_family, font_size, font_bold, font_italic)
+            # 检查是否需要使用高级渲染器（有高级效果或样式字体）
+            has_advanced_effects = text_config.has_shadow or text_config.has_outline
+            has_styled_font = font_bold or font_italic
+            use_advanced_renderer = has_advanced_effects or has_styled_font
             
-            # 获取文本尺寸
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            
-            # 计算位置（考虑自定义位置）
-            position = self.calculate_text_position(
-                img_width, img_height, text_width, text_height
-            )
-            
-            logger.info(f"批量导出: 文本尺寸({text_width}x{text_height}), 最终位置({position[0]},{position[1]})")
-            
-            # 如果有旋转，需要使用图层合成方式
-            rotation = self.watermark_config.rotation
-            if rotation != 0.0:
-                # 创建透明图层
-                text_layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
-                text_draw = ImageDraw.Draw(text_layer)
+            if use_advanced_renderer:
+                logger.info(f"批量导出: 使用高级渲染器 - 阴影:{text_config.has_shadow}, 描边:{text_config.has_outline}, 样式字体:{has_styled_font}")
                 
-                # 绘制文本到图层
-                if self.watermark_config.text_config.has_shadow:
-                    shadow_offset = self.watermark_config.text_config.shadow_offset
-                    shadow_pos = (position[0] + shadow_offset[0], position[1] + shadow_offset[1])
-                    shadow_color_with_alpha = (*self.watermark_config.text_config.shadow_color, 128)
-                    text_draw.text(shadow_pos, text, font=font, fill=shadow_color_with_alpha)
+                # 加载字体获取文本尺寸
+                font = self._load_styled_font(font_family, font_size, font_bold, font_italic)
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
                 
-                color_with_opacity = (*self.watermark_config.text_config.color, 
-                                    int(255 * self.watermark_config.text_config.opacity))
-                text_draw.text(position, text, font=font, fill=color_with_opacity)
+                # 计算位置
+                position = self.calculate_text_position(
+                    img_width, img_height, text_width, text_height
+                )
                 
-                # 旋转图层（围绕文本中心）
-                center_x = position[0] + text_width // 2
-                center_y = position[1] + text_height // 2
-                # PIL的rotate：正值=逆时针，与预览保持一致
-                text_layer = text_layer.rotate(rotation, center=(center_x, center_y), expand=False)
+                logger.info(f"批量导出: 文本尺寸({text_width}x{text_height}), 最终位置({position[0]},{position[1]})")
                 
-                # 合成到原图
-                image.paste(text_layer, (0, 0), text_layer)
+                # 使用AdvancedTextRenderer渲染（它会处理所有效果和旋转）
+                return self.advanced_text_renderer.render_text_with_effects(
+                    image, text_config, position, text, self.watermark_config.rotation
+                )
             else:
-                # 无旋转，直接绘制
-                if self.watermark_config.text_config.has_shadow:
-                    shadow_offset = self.watermark_config.text_config.shadow_offset
-                    shadow_pos = (position[0] + shadow_offset[0], position[1] + shadow_offset[1])
-                    shadow_color_with_alpha = (*self.watermark_config.text_config.shadow_color, 128)
-                    draw.text(shadow_pos, text, font=font, fill=shadow_color_with_alpha)
+                # 简单文本，使用基础渲染
+                logger.info(f"批量导出: 使用基础渲染器")
                 
-                color_with_opacity = (*self.watermark_config.text_config.color, 
-                                    int(255 * self.watermark_config.text_config.opacity))
-                draw.text(position, text, font=font, fill=color_with_opacity)
+                font = self._load_styled_font(font_family, font_size, font_bold, font_italic)
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                position = self.calculate_text_position(
+                    img_width, img_height, text_width, text_height
+                )
+                
+                logger.info(f"批量导出: 文本尺寸({text_width}x{text_height}), 最终位置({position[0]},{position[1]})")
+                
+                # 简单绘制（支持旋转）
+                rotation = self.watermark_config.rotation
+                if rotation != 0.0:
+                    text_layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
+                    text_draw = ImageDraw.Draw(text_layer)
+                    
+                    color_with_opacity = (*text_config.color, int(255 * text_config.opacity))
+                    text_draw.text(position, text, font=font, fill=color_with_opacity)
+                    
+                    center_x = position[0] + text_width // 2
+                    center_y = position[1] + text_height // 2
+                    text_layer = text_layer.rotate(rotation, center=(center_x, center_y), expand=False)
+                    
+                    image.paste(text_layer, (0, 0), text_layer)
+                    return image
+                else:
+                    color_with_opacity = (*text_config.color, int(255 * text_config.opacity))
+                    draw.text(position, text, font=font, fill=color_with_opacity)
+                    return image
             
         except Exception as e:
             logger.error(f"应用文本水印失败: {e}")
+            return image
     
     def calculate_text_position(self, img_width, img_height, text_width, text_height):
         """计算文本位置（支持自定义位置）"""

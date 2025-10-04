@@ -1,0 +1,37 @@
+{
+  "name": "带阴影文字水印",
+  "config": {
+    "watermark_type": "text",
+    "text_config": {
+      "text": "© 2025",
+      "font_family": "Microsoft YaHei",
+      "font_size": 36,
+      "font_bold": false,
+      "font_italic": false,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "opacity": 0.9,
+      "has_shadow": true,
+      "shadow_color": [
+        0,
+        0,
+        0
+      ],
+      "shadow_offset_x": 3,
+      "shadow_offset_y": 3,
+      "shadow_blur": 5,
+      "shadow_opacity": 0.6,
+      "has_outline": false
+    },
+    "position": "top_left",
+    "margin_x": 20,
+    "margin_y": 20,
+    "rotation": 0.0
+  },
+  "description": "左上角文字，带阴影效果增强可读性",
+  "created_at": "2025-10-04 15:37:37",
+  "is_default": true
+}

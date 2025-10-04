@@ -75,6 +75,22 @@ class FontManager:
         """
         cls._initialize_font_cache()
         
+        # 特殊处理：对于已知不支持特定样式组合的字体，直接返回None
+        # 这样可以触发AdvancedTextRenderer中的字体替代逻辑
+        font_key_lower = font_name.lower()
+        
+        # 微软雅黑不支持斜体和粗斜体
+        if font_key_lower in ["microsoft yahei", "microsoft yahei ui", "微软雅黑", "msyh"]:
+            if italic:  # 无论是否粗体，只要有斜体就不支持
+                logger.info(f"FontManager: {font_name} 不原生支持斜体，返回None以触发字体替代")
+                return None
+        
+        # 其他中文字体也通常不支持斜体
+        chinese_fonts = ["宋体", "黑体", "楷体", "仿宋", "simsun", "simhei", "simkai", "simfang", "kaiti", "fangsong"]
+        if italic and any(cf in font_key_lower for cf in chinese_fonts):
+            logger.info(f"FontManager: {font_name} 为中文字体，不原生支持斜体，返回None以触发字体替代")
+            return None
+        
         # 字体名称别名映射（处理常见的中英文名称变体）
         font_aliases = {
             "微软雅黑": ["microsoft yahei", "msyh"],
@@ -161,6 +177,48 @@ class FontManager:
         
         logger.warning(f"未找到字体: {font_name} (bold={bold}, italic={italic})")
         return None
+    
+    @classmethod
+    def check_font_style_support(cls, font_name: str, bold: bool = False, italic: bool = False) -> bool:
+        """
+        检查字体是否支持指定的样式（粗体/斜体）
+        
+        Args:
+            font_name: 字体名称
+            bold: 是否检查粗体支持
+            italic: 是否检查斜体支持
+            
+        Returns:
+            True if the font has native support for the style, False otherwise
+        """
+        if not bold and not italic:
+            # 基础字体始终支持
+            return True
+        
+        # 特殊处理：已知不支持的字体样式组合
+        font_key_lower = font_name.lower()
+        
+        # 微软雅黑不支持斜体（无论是否粗体）
+        if font_key_lower in ["microsoft yahei", "microsoft yahei ui", "微软雅黑", "msyh"]:
+            if italic:
+                return False
+        
+        # 其他中文字体通常不支持斜体
+        chinese_fonts = ["宋体", "黑体", "楷体", "仿宋", "simsun", "simhei", "simkai", "simfang", "kaiti", "fangsong"]
+        if italic and any(cf in font_key_lower for cf in chinese_fonts):
+            return False
+        
+        # 尝试获取带样式的字体路径
+        styled_font_path = cls.get_font_path(font_name, bold, italic)
+        base_font_path = cls.get_font_path(font_name, False, False)
+        
+        # 如果找到了带样式的字体，且与基础字体路径不同，说明有原生支持
+        if styled_font_path and base_font_path:
+            # 如果路径不同，说明有独立的样式字体文件
+            return styled_font_path != base_font_path
+        
+        # 如果没找到带样式的字体，说明不支持该样式
+        return False
     
     @classmethod
     def list_available_fonts(cls) -> list:

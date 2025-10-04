@@ -9,7 +9,7 @@ try:
     from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
         QLabel, QPushButton, QFrame, QSizePolicy, QAbstractItemView,
-        QMenu, QMessageBox
+        QMenu, QMessageBox, QCheckBox
     )
     from PyQt5.QtCore import Qt, QSize, pyqtSignal, pyqtSlot, QThread, QObject
     from PyQt5.QtGui import QPixmap, QIcon, QFont, QDragEnterEvent, QDropEvent
@@ -101,6 +101,7 @@ class ImageListItem(QWidget):
         self.image_info = image_info
         self.index = index
         self.thumbnail_path = None
+        self.checkbox = None  # Will be created in init_ui
         
         self.init_ui()
     
@@ -109,6 +110,34 @@ class ImageListItem(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 3, 5, 3)
         layout.setSpacing(8)
+        
+        # Checkbox for selection
+        self.checkbox = QCheckBox()
+        self.checkbox.setChecked(self.image_info.is_selected)
+        self.checkbox.setStyleSheet("""
+            QCheckBox {
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #bbb;
+                border-radius: 3px;
+                background-color: white;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #2196f3;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2196f3;
+                border-color: #2196f3;
+                image: url(none);
+            }
+            QCheckBox::indicator:checked:hover {
+                background-color: #1976d2;
+            }
+        """)
+        layout.addWidget(self.checkbox)
         
         # Thumbnail label
         self.thumbnail_label = QLabel()
@@ -129,7 +158,12 @@ class ImageListItem(QWidget):
         info_layout.setSpacing(2)
         
         # File name
-        self.name_label = QLabel(self.image_info.file_name)
+        filename = self.image_info.file_name
+        # Truncate long filenames for display
+        if len(filename) > 30:
+            filetype = os.path.splitext(filename)[1]
+            filename = filename[:27 - len(filetype)] + "..." + filetype
+        self.name_label = QLabel(filename)
         self.name_label.setStyleSheet("""
             QLabel {
                 font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "SimSun", "宋体", sans-serif;
@@ -189,6 +223,11 @@ class ImageListItem(QWidget):
     
     def set_selected(self, selected: bool):
         """Set selection state visual feedback"""
+        # Update checkbox state
+        if self.checkbox:
+            self.checkbox.setChecked(selected)
+        
+        # Update background style
         if selected:
             self.setStyleSheet("""
                 ImageListItem {
@@ -351,6 +390,12 @@ class ImageListWidget(QWidget):
             # Create custom widget
             item_widget = ImageListItem(image_info, i)
             
+            # Connect checkbox signal
+            if item_widget.checkbox:
+                item_widget.checkbox.stateChanged.connect(
+                    lambda state, idx=i: self.on_checkbox_changed(idx, state)
+                )
+            
             # Add to list
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, item_widget)
@@ -411,17 +456,18 @@ class ImageListWidget(QWidget):
             if isinstance(widget, ImageListItem) and i < len(images):
                 widget.set_selected(images[i].is_selected)
     
+    def on_checkbox_changed(self, index: int, state: int):
+        """Handle checkbox state change"""
+        is_checked = (state == Qt.Checked)
+        self.model.set_selection(index, is_checked)
+        logger.debug(f"图片 {index} 选中状态: {is_checked}")
+    
     @pyqtSlot(QListWidgetItem)
     def on_item_clicked(self, item: QListWidgetItem):
         """Handle item click"""
         index = self.list_widget.row(item)
         if index >= 0:
-            # Toggle selection
-            image_info = self.model.get_image(index)
-            if image_info:
-                self.model.set_selection(index, not image_info.is_selected)
-            
-            # Emit selection signal
+            # Emit selection signal for preview
             self.image_selected.emit(index)
     
     @pyqtSlot(int, str)

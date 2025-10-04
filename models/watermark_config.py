@@ -103,10 +103,14 @@ class WatermarkConfig:
     @log_exception
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
-        logger.debug(f"将水印配置转换为字典: 类型={self.watermark_type.value}, 位置={self.position.value}")
+        # 处理可能是字符串或枚举的情况
+        watermark_type_value = self.watermark_type.value if hasattr(self.watermark_type, 'value') else self.watermark_type
+        position_value = self.position.value if hasattr(self.position, 'value') else self.position
+        
+        logger.debug(f"将水印配置转换为字典: 类型={watermark_type_value}, 位置={position_value}")
         return {
-            'watermark_type': self.watermark_type.value,
-            'position': self.position.value,
+            'watermark_type': watermark_type_value,
+            'position': position_value,
             'custom_x': self.custom_x,
             'custom_y': self.custom_y,
             'margin_x': self.margin_x,
@@ -123,9 +127,11 @@ class WatermarkConfig:
                 'has_shadow': self.text_config.has_shadow,
                 'shadow_offset': self.text_config.shadow_offset,
                 'shadow_color': self.text_config.shadow_color,
+                'shadow_opacity': self.text_config.shadow_opacity,
                 'has_outline': self.text_config.has_outline,
                 'outline_width': self.text_config.outline_width,
                 'outline_color': self.text_config.outline_color,
+                'outline_opacity': self.text_config.outline_opacity,
             },
             'image_config': {
                 'image_path': self.image_config.image_path,
@@ -163,9 +169,11 @@ class WatermarkConfig:
             has_shadow=text_data.get('has_shadow', False),
             shadow_offset=tuple(text_data.get('shadow_offset', [2, 2])),
             shadow_color=tuple(text_data.get('shadow_color', [0, 0, 0])),
+            shadow_opacity=text_data.get('shadow_opacity', 0.6),
             has_outline=text_data.get('has_outline', False),
             outline_width=text_data.get('outline_width', 1),
             outline_color=tuple(text_data.get('outline_color', [0, 0, 0])),
+            outline_opacity=text_data.get('outline_opacity', 1.0),
         )
         
         # Image config

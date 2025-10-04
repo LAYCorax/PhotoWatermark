@@ -1,0 +1,53 @@
+{
+  "name": "常用模板",
+  "config": {
+    "watermark_type": "text",
+    "position": "center",
+    "custom_x": 0,
+    "custom_y": 0,
+    "margin_x": 10,
+    "margin_y": 10,
+    "rotation": 0.0,
+    "text_config": {
+      "text": "Watermark",
+      "font_family": "Arial",
+      "font_size": 32,
+      "font_bold": false,
+      "font_italic": false,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "opacity": 0.8,
+      "has_shadow": false,
+      "shadow_offset": [
+        3,
+        3
+      ],
+      "shadow_color": [
+        0,
+        0,
+        0
+      ],
+      "shadow_opacity": 0.6,
+      "has_outline": false,
+      "outline_width": 2,
+      "outline_color": [
+        0,
+        0,
+        0
+      ],
+      "outline_opacity": 1.0
+    },
+    "image_config": {
+      "image_path": "",
+      "scale": 1.0,
+      "opacity": 0.8,
+      "maintain_aspect_ratio": true
+    }
+  },
+  "description": "",
+  "created_at": "2025-10-04 15:37:51",
+  "is_default": false
+}

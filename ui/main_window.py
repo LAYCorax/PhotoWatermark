@@ -31,6 +31,7 @@ from ui.dialogs.watermark_progress_dialog import WatermarkProgressDialog
 from ui.dialogs.file_import_progress_dialog import FileImportProgressDialog
 from ui.dialogs.export_settings_dialog import ExportSettingsDialog
 from ui.dialogs.export_progress_dialog import ExportProgressDialog
+from ui.dialogs.template_dialog import TemplateDialog
 from core.batch_export_engine import BatchExportEngine
 
 
@@ -453,8 +454,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先选择要导出的图片")
             return
         
-        # 显示导出设置对话框
-        dialog = ExportSettingsDialog(len(selected_images), self)
+        # 显示导出设置对话框，传递图片列表
+        dialog = ExportSettingsDialog(len(selected_images), selected_images, self)
         dialog.export_requested.connect(lambda config: self.start_batch_export(selected_images, config))
         dialog.exec_()
     
@@ -465,8 +466,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先导入图片")
             return
             
-        # 显示导出设置对话框
-        dialog = ExportSettingsDialog(len(all_images), self)
+        # 显示导出设置对话框，传递图片列表
+        dialog = ExportSettingsDialog(len(all_images), all_images, self)
         dialog.export_requested.connect(lambda config: self.start_batch_export(all_images, config))
         dialog.exec_()
     
@@ -568,6 +569,34 @@ class MainWindow(QMainWindow):
             "基于 MaaAssistantArknights 设计风格\n"
             "使用 PyQt5 和 Pillow 开发"
         )
+    
+    @log_exception
+    def show_template_manager(self):
+        """显示模板管理对话框"""
+        dialog = TemplateDialog(self.watermark_config, self)
+        dialog.template_applied.connect(self.apply_template)
+        dialog.exec_()
+    
+    @log_exception
+    def apply_template(self, template_config: dict):
+        """应用模板配置"""
+        try:
+            # 从字典创建新的水印配置
+            new_config = WatermarkConfig.from_dict(template_config)
+            self.watermark_config = new_config
+            
+            # 更新配置控件
+            self.config_widget.load_config(new_config)
+            
+            # 更新预览
+            self.on_config_changed()
+            
+            logger.info("模板应用成功")
+            self.status_bar.showMessage("模板已应用", 3000)
+            
+        except Exception as e:
+            logger.error(f"应用模板失败: {e}")
+            QMessageBox.critical(self, "错误", f"应用模板失败: {str(e)}")
     
     def closeEvent(self, event):
         """Handle window close event"""

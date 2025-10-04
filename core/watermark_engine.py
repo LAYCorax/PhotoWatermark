@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 from models.watermark_config import WatermarkConfig, WatermarkType, WatermarkPosition
 from core.advanced_text_renderer import AdvancedTextRenderer
 from utils.logger import logger, log_exception, log_performance
+from utils.font_manager import FontManager
 
 
 class WatermarkEngine:
@@ -134,22 +135,22 @@ class WatermarkEngine:
             )
             
             # Also use advanced renderer for styled fonts (bold, italic, or both) to ensure proper rendering
+            # This is critical: AdvancedTextRenderer has fallback logic for fonts that don't have italic/bold variants
             has_styled_font = (
                 text_config.font_bold or 
                 text_config.font_italic
             )
             
-            # Allow advanced renderer for styled fonts even in conservative modes
-            use_advanced_renderer = (
-                has_advanced_effects or 
-                (has_styled_font and not (self.ultra_conservative_mode and has_advanced_effects))
-            )
+            # IMPORTANT: Always use advanced renderer for styled fonts OR effects
+            # This ensures font fallback logic (e.g., Arial italic for fonts without italic) is applied
+            use_advanced_renderer = has_advanced_effects or has_styled_font
             
             if use_advanced_renderer:
                 if has_styled_font and not has_advanced_effects:
-                    logger.info(f"导出: 使用高级渲染器处理样式字体 - 粗体:{text_config.font_bold}, 斜体:{text_config.font_italic}")
+                    logger.info(f"导出: 使用高级渲染器处理样式字体（含字体回退机制） - 粗体:{text_config.font_bold}, 斜体:{text_config.font_italic}")
                 else:
                     logger.info(f"导出: 使用高级文本效果渲染器 - 阴影:{text_config.has_shadow}, 描边:{text_config.has_outline}")
+                
                 # Load font first to get accurate text dimensions
                 font = self._load_font(text_config.font_family, text_config.font_size, text_config.font_bold, text_config.font_italic)
                 
@@ -172,7 +173,8 @@ class WatermarkEngine:
                     img.size[0], img.size[1], text_width, text_height, config
                 )
                 logger.info(f"导出: 文本尺寸({text_width}x{text_height}), 最终位置({x},{y})")
-                # Use advanced renderer for styled fonts with effects
+                
+                # Use advanced renderer - it has proper font fallback logic
                 return self.advanced_text_renderer.render_text_with_effects(
                     img, text_config, (x, y), text, config.rotation
                 )
@@ -387,11 +389,35 @@ class WatermarkEngine:
             return img
     
     def _load_font(self, font_family: str, font_size: int, bold: bool = False, italic: bool = False) -> ImageFont.FreeTypeFont:
-        """加载字体，支持粗体和斜体"""
+        """加载字体，支持粗体和斜体 - 使用FontManager确保与预览一致"""
+        logger.debug(f"导出: 加载字体 {font_family}, 大小:{font_size}, 粗体:{bold}, 斜体:{italic}")
+        
+        # 首先尝试使用FontManager获取字体路径（与预览保持一致）
+        font_path = FontManager.get_font_path(font_family, bold, italic)
+        if font_path:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+                logger.info(f"导出: 成功使用FontManager加载字体: {font_family} -> {font_path}")
+                return font
+            except Exception as e:
+                logger.warning(f"导出: FontManager找到字体文件但加载失败 {font_path}: {e}")
+        
+        # 如果没有样式需求，再次尝试查找基础字体
+        if (bold or italic) and font_path is None:
+            font_path = FontManager.get_font_path(font_family, False, False)
+            if font_path:
+                try:
+                    font = ImageFont.truetype(font_path, font_size)
+                    logger.warning(f"导出: 使用基础字体替代样式字体: {font_family} -> {font_path}")
+                    return font
+                except Exception as e:
+                    logger.warning(f"导出: 基础字体加载失败 {font_path}: {e}")
+        
+        # Fallback: 尝试常见字体路径（保持原有逻辑作为备用）
         font_paths = []
         
         # Build font paths based on style requirements
-        if font_family == "Microsoft YaHei UI" or font_family == "Microsoft YaHei":
+        if font_family in ["Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑"]:
             if bold and italic:
                 # For bold+italic combination, try Arial bold italic first, then YaHei bold
                 font_paths.extend(["C:/Windows/Fonts/arialbi.ttf", "arialbi.ttf", "C:/Windows/Fonts/msyhbd.ttc", "msyhbd.ttc"])
@@ -420,6 +446,52 @@ class WatermarkEngine:
                 font_paths.extend(["C:/Windows/Fonts/timesi.ttf", "timesi.ttf"])
             else:
                 font_paths.extend(["C:/Windows/Fonts/times.ttf", "times.ttf"])
+        else:
+            # 通用字体加载策略
+            # 尝试多种可能的文件扩展名和粗体/斜体变体
+            extensions = [".ttf", ".ttc", ".otf"]
+            style_suffixes = []
+            
+            if bold and italic:
+                style_suffixes = ["bi", "bd", "bold-italic", "bolditalic", "z"]  # z是粗体的另一种命名
+            elif bold:
+                style_suffixes = ["bd", "bold", "b"]
+            elif italic:
+                style_suffixes = ["i", "italic", "o"]
+            else:
+                style_suffixes = [""]
+            
+            # 字体名称映射表（中文名到文件名）
+            font_name_mapping = {
+                "微软雅黑": "msyh",
+                "宋体": "simsun",
+                "黑体": "simhei",
+                "楷体": "simkai",
+                "仿宋": "simfang",
+                "Microsoft YaHei": "msyh",
+                "Microsoft YaHei UI": "msyh",
+                "SimSun": "simsun",
+                "SimHei": "simhei",
+                "KaiTi": "simkai",
+                "FangSong": "simfang",
+            }
+            
+            font_base = font_name_mapping.get(font_family, font_family.lower().replace(" ", ""))
+            
+            # 组合字体路径
+            for suffix in style_suffixes:
+                for ext in extensions:
+                    if suffix:
+                        font_paths.append(f"C:/Windows/Fonts/{font_base}{suffix}{ext}")
+                        font_paths.append(f"C:/Windows/Fonts/{font_base}_{suffix}{ext}")
+                        font_paths.append(f"C:/Windows/Fonts/{font_base}-{suffix}{ext}")
+                    else:
+                        font_paths.append(f"C:/Windows/Fonts/{font_base}{ext}")
+            
+            # 尝试直接使用字体名称
+            for ext in extensions:
+                font_paths.append(f"C:/Windows/Fonts/{font_family}{ext}")
+                font_paths.append(f"C:/Windows/Fonts/{font_family.replace(' ', '')}{ext}")
         
         # Fallback fonts
         font_paths.extend([
@@ -436,12 +508,12 @@ class WatermarkEngine:
         for font_path in font_paths:
             try:
                 font = ImageFont.truetype(font_path, font_size)
-                logger.debug(f"成功加载字体: {font_path} (粗体:{bold}, 斜体:{italic})")
+                logger.debug(f"导出: 成功加载字体: {font_path} (粗体:{bold}, 斜体:{italic})")
                 return font
             except (OSError, IOError):
                 continue
         
-        logger.warning(f"无法加载字体 {font_family}，使用默认字体")
+        logger.warning(f"导出: 无法加载字体 {font_family}，使用默认字体")
         return ImageFont.load_default()
     
     def _calculate_position(self, img_w: int, img_h: int, wm_w: int, wm_h: int,
